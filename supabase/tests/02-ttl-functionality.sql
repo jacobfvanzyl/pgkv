@@ -6,7 +6,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
 -- Plan the number of tests
-SELECT plan(14);
+SELECT plan(15);
 
 -- Test SET with TTL
 SELECT is(
@@ -88,8 +88,8 @@ SELECT is(
     'SET key with 1 second TTL'
 );
 
--- Wait 2 seconds for expiration
-SELECT pg_sleep(2);
+-- Wait 3 seconds for expiration (buffer for timing)
+SELECT pg_sleep(3);
 
 SELECT is(
     pgkv.get('short_ttl'),

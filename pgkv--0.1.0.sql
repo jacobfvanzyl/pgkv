@@ -134,7 +134,7 @@ BEGIN
     END IF;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         RETURN NULL;
     END IF;
@@ -279,7 +279,7 @@ BEGIN
         v_numeric := 0;
     ELSE
         -- Check if expired
-        IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+        IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
             DELETE FROM pgkv.store WHERE key = p_key;
             v_numeric := 0;
         ELSE
@@ -345,7 +345,7 @@ BEGIN
         v_numeric := 0;
     ELSE
         -- Check if expired
-        IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+        IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
             DELETE FROM pgkv.store WHERE key = p_key;
             v_numeric := 0;
         ELSE
@@ -456,7 +456,7 @@ DECLARE
 BEGIN
     -- First, clean up expired keys
     DELETE FROM pgkv.store
-    WHERE expires_at IS NOT NULL AND expires_at < NOW();
+    WHERE expires_at IS NOT NULL AND expires_at < clock_timestamp();
 
     -- Convert Redis pattern to PostgreSQL pattern
     v_pg_pattern := pgkv.redis_to_pg_pattern(p_pattern);
@@ -499,7 +499,7 @@ BEGIN
     END IF;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         RETURN 'none';
     END IF;
@@ -527,7 +527,7 @@ BEGIN
     WHERE key = p_key;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         v_value := NULL;
         v_type := NULL;
@@ -582,8 +582,8 @@ BEGIN
     WHERE key = p_key;
 
     -- Key doesn't exist or expired
-    IF v_value IS NULL OR (v_expires_at IS NOT NULL AND v_expires_at < NOW()) THEN
-        IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_value IS NULL OR (v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp()) THEN
+        IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
             DELETE FROM pgkv.store WHERE key = p_key;
         END IF;
         RETURN 0;
@@ -626,8 +626,8 @@ BEGIN
     WHERE key = p_key;
 
     -- Key doesn't exist or expired
-    IF v_value IS NULL OR (v_expires_at IS NOT NULL AND v_expires_at < NOW()) THEN
-        IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_value IS NULL OR (v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp()) THEN
+        IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
             DELETE FROM pgkv.store WHERE key = p_key;
         END IF;
         RETURN '';
@@ -692,7 +692,7 @@ BEGIN
     WHERE key = p_key;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         v_value := NULL;
         v_type := NULL;
@@ -784,7 +784,7 @@ BEGIN
     WHERE key = p_key;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         v_value := NULL;
         v_type := NULL;
@@ -846,7 +846,7 @@ BEGIN
     END IF;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         RETURN NULL;
     END IF;
@@ -887,7 +887,7 @@ BEGIN
     END IF;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         FOREACH v_field IN ARRAY p_fields
         LOOP
@@ -932,7 +932,7 @@ BEGIN
     END IF;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         RETURN;
     END IF;
@@ -970,7 +970,7 @@ BEGIN
     END IF;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         RETURN 0;
     END IF;
@@ -990,7 +990,7 @@ BEGIN
     END LOOP;
 
     -- Update or delete key if empty
-    IF jsonb_object_keys(v_value) IS NULL OR v_value = '{}'::jsonb THEN
+    IF v_value = '{}'::jsonb THEN
         DELETE FROM pgkv.store WHERE key = p_key;
     ELSE
         UPDATE pgkv.store
@@ -1021,7 +1021,7 @@ BEGIN
     END IF;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         RETURN 0;
     END IF;
@@ -1054,7 +1054,7 @@ BEGIN
     END IF;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         RETURN 0;
     END IF;
@@ -1087,7 +1087,7 @@ BEGIN
     END IF;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         RETURN;
     END IF;
@@ -1121,7 +1121,7 @@ BEGIN
     END IF;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         RETURN;
     END IF;
@@ -1153,7 +1153,7 @@ BEGIN
     WHERE key = p_key;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         v_value := NULL;
         v_type := NULL;
@@ -1215,13 +1215,14 @@ DECLARE
     v_expires_at TIMESTAMPTZ;
     v_val TEXT;
     v_new_array JSONB;
+    v_i INTEGER;
 BEGIN
     SELECT value, type, expires_at INTO v_value, v_type, v_expires_at
     FROM pgkv.store
     WHERE key = p_key;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         v_value := NULL;
         v_type := NULL;
@@ -1237,8 +1238,9 @@ BEGIN
         v_value := '[]'::jsonb;
     END IF;
 
-    -- Prepend values in reverse order to maintain Redis behavior
-    FOR v_i IN REVERSE array_length(p_values, 1)..1
+    -- Prepend values one by one to maintain Redis behavior
+    -- LPUSH a b c d results in [d, c, b, a]
+    FOR v_i IN 1..array_length(p_values, 1)
     LOOP
         v_value := jsonb_insert(v_value, '{0}', to_jsonb(p_values[v_i]));
     END LOOP;
@@ -1271,7 +1273,7 @@ BEGIN
     WHERE key = p_key;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         v_value := NULL;
         v_type := NULL;
@@ -1327,7 +1329,7 @@ BEGIN
     END IF;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         RETURN;
     END IF;
@@ -1384,7 +1386,7 @@ BEGIN
     END IF;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         RETURN;
     END IF;
@@ -1438,7 +1440,7 @@ BEGIN
     END IF;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         RETURN 0;
     END IF;
@@ -1475,7 +1477,7 @@ BEGIN
     END IF;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         RETURN;
     END IF;
@@ -1524,7 +1526,7 @@ BEGIN
     END IF;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         RETURN NULL;
     END IF;
@@ -1569,7 +1571,7 @@ BEGIN
     END IF;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         RAISE EXCEPTION 'no such key';
     END IF;
@@ -1624,7 +1626,7 @@ BEGIN
     END IF;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         RETURN 'OK';
     END IF;
@@ -1693,7 +1695,7 @@ BEGIN
     END IF;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         RETURN 0;
     END IF;
@@ -1766,7 +1768,7 @@ BEGIN
     WHERE key = p_key;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         v_value := NULL;
         v_type := NULL;
@@ -1834,7 +1836,7 @@ BEGIN
     END IF;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         RETURN 0;
     END IF;
@@ -1899,7 +1901,7 @@ BEGIN
     END IF;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         RETURN;
     END IF;
@@ -1934,7 +1936,7 @@ BEGIN
     END IF;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         RETURN 0;
     END IF;
@@ -1972,7 +1974,7 @@ BEGIN
     END IF;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         RETURN 0;
     END IF;
@@ -2016,7 +2018,7 @@ BEGIN
     END IF;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = v_first_key;
         RETURN;
     END IF;
@@ -2039,7 +2041,7 @@ BEGIN
             RETURN;
         END IF;
 
-        IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+        IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
             DELETE FROM pgkv.store WHERE key = v_key;
             RETURN;
         END IF;
@@ -2090,7 +2092,7 @@ BEGIN
             CONTINUE;
         END IF;
 
-        IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+        IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
             DELETE FROM pgkv.store WHERE key = v_key;
             CONTINUE;
         END IF;
@@ -2148,7 +2150,7 @@ BEGIN
     END IF;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = v_first_key;
         RETURN;
     END IF;
@@ -2171,7 +2173,7 @@ BEGIN
             CONTINUE;
         END IF;
 
-        IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+        IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
             DELETE FROM pgkv.store WHERE key = v_key;
             CONTINUE;
         END IF;
@@ -2235,7 +2237,7 @@ BEGIN
     WHERE key = p_key;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         v_value := NULL;
         v_type := NULL;
@@ -2297,8 +2299,8 @@ BEGIN
     WHERE key = p_key;
 
     -- Key doesn't exist or expired
-    IF v_value IS NULL OR (v_expires_at IS NOT NULL AND v_expires_at < NOW()) THEN
-        IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_value IS NULL OR (v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp()) THEN
+        IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
             DELETE FROM pgkv.store WHERE key = p_key;
         END IF;
         RETURN 0;
@@ -2352,8 +2354,8 @@ BEGIN
     WHERE key = p_key;
 
     -- Key doesn't exist or expired
-    IF v_value IS NULL OR (v_expires_at IS NOT NULL AND v_expires_at < NOW()) THEN
-        IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_value IS NULL OR (v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp()) THEN
+        IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
             DELETE FROM pgkv.store WHERE key = p_key;
         END IF;
         RETURN;
@@ -2419,8 +2421,8 @@ BEGIN
     WHERE key = p_key;
 
     -- Key doesn't exist or expired
-    IF v_value IS NULL OR (v_expires_at IS NOT NULL AND v_expires_at < NOW()) THEN
-        IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_value IS NULL OR (v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp()) THEN
+        IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
             DELETE FROM pgkv.store WHERE key = p_key;
         END IF;
         RETURN;
@@ -2482,8 +2484,8 @@ BEGIN
     WHERE key = p_key;
 
     -- Key doesn't exist or expired
-    IF v_value IS NULL OR (v_expires_at IS NOT NULL AND v_expires_at < NOW()) THEN
-        IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_value IS NULL OR (v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp()) THEN
+        IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
             DELETE FROM pgkv.store WHERE key = p_key;
         END IF;
         RETURN NULL;
@@ -2521,8 +2523,8 @@ BEGIN
     WHERE key = p_key;
 
     -- Key doesn't exist or expired
-    IF v_value IS NULL OR (v_expires_at IS NOT NULL AND v_expires_at < NOW()) THEN
-        IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_value IS NULL OR (v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp()) THEN
+        IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
             DELETE FROM pgkv.store WHERE key = p_key;
         END IF;
         RETURN 0;
@@ -2555,8 +2557,8 @@ BEGIN
     WHERE key = p_key;
 
     -- Key doesn't exist or expired
-    IF v_value IS NULL OR (v_expires_at IS NOT NULL AND v_expires_at < NOW()) THEN
-        IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_value IS NULL OR (v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp()) THEN
+        IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
             DELETE FROM pgkv.store WHERE key = p_key;
         END IF;
         RETURN NULL;
@@ -2573,10 +2575,14 @@ BEGIN
     END IF;
 
     -- Calculate rank
-    SELECT (ROW_NUMBER() OVER (ORDER BY (kv.value::text)::numeric ASC, kv.key::text ASC) - 1)::integer
-    INTO v_rank
-    FROM jsonb_each(v_value) kv
-    WHERE kv.key = p_member;
+    WITH ranked AS (
+        SELECT kv.key,
+               (ROW_NUMBER() OVER (ORDER BY (kv.value::text)::numeric ASC, kv.key::text ASC) - 1)::integer AS rank
+        FROM jsonb_each(v_value) kv
+    )
+    SELECT rank INTO v_rank
+    FROM ranked
+    WHERE key = p_member;
 
     RETURN v_rank;
 END;
@@ -2599,8 +2605,8 @@ BEGIN
     WHERE key = p_key;
 
     -- Key doesn't exist or expired
-    IF v_value IS NULL OR (v_expires_at IS NOT NULL AND v_expires_at < NOW()) THEN
-        IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_value IS NULL OR (v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp()) THEN
+        IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
             DELETE FROM pgkv.store WHERE key = p_key;
         END IF;
         RETURN NULL;
@@ -2617,10 +2623,14 @@ BEGIN
     END IF;
 
     -- Calculate reverse rank
-    SELECT (ROW_NUMBER() OVER (ORDER BY (kv.value::text)::numeric DESC, kv.key::text DESC) - 1)::integer
-    INTO v_rank
-    FROM jsonb_each(v_value) kv
-    WHERE kv.key = p_member;
+    WITH ranked AS (
+        SELECT kv.key,
+               (ROW_NUMBER() OVER (ORDER BY (kv.value::text)::numeric DESC, kv.key::text DESC) - 1)::integer AS rank
+        FROM jsonb_each(v_value) kv
+    )
+    SELECT rank INTO v_rank
+    FROM ranked
+    WHERE key = p_member;
 
     RETURN v_rank;
 END;
@@ -2644,8 +2654,8 @@ BEGIN
     WHERE key = p_key;
 
     -- Key doesn't exist or expired
-    IF v_value IS NULL OR (v_expires_at IS NOT NULL AND v_expires_at < NOW()) THEN
-        IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_value IS NULL OR (v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp()) THEN
+        IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
             DELETE FROM pgkv.store WHERE key = p_key;
         END IF;
         RETURN;
@@ -2685,7 +2695,7 @@ BEGIN
     WHERE key = p_key;
 
     -- Check if expired
-    IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
         DELETE FROM pgkv.store WHERE key = p_key;
         v_value := NULL;
         v_type := NULL;
@@ -2744,8 +2754,8 @@ BEGIN
     WHERE key = p_key;
 
     -- Key doesn't exist or expired
-    IF v_value IS NULL OR (v_expires_at IS NOT NULL AND v_expires_at < NOW()) THEN
-        IF v_expires_at IS NOT NULL AND v_expires_at < NOW() THEN
+    IF v_value IS NULL OR (v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp()) THEN
+        IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
             DELETE FROM pgkv.store WHERE key = p_key;
         END IF;
         RETURN 0;
@@ -2778,7 +2788,7 @@ DECLARE
     v_deleted INTEGER;
 BEGIN
     DELETE FROM pgkv.store
-    WHERE expires_at IS NOT NULL AND expires_at < NOW();
+    WHERE expires_at IS NOT NULL AND expires_at < clock_timestamp();
 
     GET DIAGNOSTICS v_deleted = ROW_COUNT;
     RETURN v_deleted;

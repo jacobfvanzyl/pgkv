@@ -6,7 +6,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
 -- Plan the number of tests
-SELECT plan(25);
+SELECT plan(27);
 
 -- Test extension exists
 SELECT has_extension('pgkv', 'pgkv extension should be installed');
@@ -144,7 +144,7 @@ SELECT is(
 );
 
 SELECT is(
-    (pgkv.get('jsonb_test')::jsonb)->>'name',
+    (pgkv.get('jsonb_test')#>>'{}')::jsonb->>'name',
     'alice',
     'Should be able to extract JSON fields from JSONB value'
 );

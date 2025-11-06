@@ -6,7 +6,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
 -- Plan the number of tests
-SELECT plan(50);
+SELECT plan(53);
 
 -- ============================================================================
 -- SORTED SET Operations (ZADD, ZREM, ZRANGE, ZREVRANGE, ZSCORE, ZCARD, ZRANK, ZREVRANK, ZRANGEBYSCORE, ZINCRBY, ZCOUNT)

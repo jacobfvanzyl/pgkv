@@ -6,7 +6,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
 -- Plan the number of tests
-SELECT plan(35);
+SELECT plan(37);
 
 -- ============================================================================
 -- SET Operations (SADD, SREM, SMEMBERS, SISMEMBER, SCARD, SINTER, SUNION, SDIFF)
@@ -60,12 +60,12 @@ SELECT is(
 SELECT has_function('pgkv', 'smembers', ARRAY['text'], 'pgkv.smembers function should exist');
 
 SELECT ok(
-    (SELECT COUNT(*) FROM pgkv.smembers('myset') = 5),
+    (SELECT COUNT(*) FROM pgkv.smembers('myset')) = 5,
     'SMEMBERS should return 5 members'
 );
 
 SELECT ok(
-    EXISTS(SELECT 1 FROM pgkv.smembers('myset') WHERE value = to_jsonb('apple'::text)),
+    EXISTS(SELECT 1 FROM pgkv.smembers('myset') WHERE smembers = to_jsonb('apple'::text)),
     'SMEMBERS should contain apple'
 );
 
@@ -139,7 +139,7 @@ SELECT results_eq(
 
 -- Test empty intersection
 SELECT ok(
-    (SELECT COUNT(*) FROM pgkv.sinter('set1', 'nonexistent') = 0),
+    (SELECT COUNT(*) FROM pgkv.sinter('set1', 'nonexistent')) = 0,
     'SINTER with nonexistent set should return empty'
 );
 
@@ -181,7 +181,7 @@ SELECT results_eq(
 
 -- Test empty difference
 SELECT ok(
-    (SELECT COUNT(*) FROM pgkv.sdiff('set1', 'set1') = 0),
+    (SELECT COUNT(*) FROM pgkv.sdiff('set1', 'set1')) = 0,
     'SDIFF of set with itself should return empty'
 );
 

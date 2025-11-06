@@ -6,7 +6,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
 -- Plan the number of tests
-SELECT plan(35);
+SELECT plan(38);
 
 -- ============================================================================
 -- HASH Operations (HSET, HGET, HMGET, HGETALL, HDEL, HEXISTS, HLEN, HKEYS, HVALS, HINCRBY)
@@ -70,7 +70,7 @@ SELECT results_eq(
 SELECT has_function('pgkv', 'hgetall', ARRAY['text'], 'pgkv.hgetall function should exist');
 
 SELECT ok(
-    (SELECT COUNT(*) FROM pgkv.hgetall('user:1000') = 3),
+    (SELECT COUNT(*) FROM pgkv.hgetall('user:1000')) = 3,
     'HGETALL should return all 3 fields'
 );
 
@@ -123,7 +123,7 @@ SELECT results_eq(
 SELECT has_function('pgkv', 'hvals', ARRAY['text'], 'pgkv.hvals function should exist');
 
 SELECT ok(
-    (SELECT COUNT(*) FROM pgkv.hvals('user:1000') = 3),
+    (SELECT COUNT(*) FROM pgkv.hvals('user:1000')) = 3,
     'HVALS should return 3 values'
 );
 
