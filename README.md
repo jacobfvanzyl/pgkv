@@ -461,7 +461,9 @@ SELECT pgkv.flushall();
 
 ## API Reference
 
-### Basic Operations
+### Quick Reference Tables
+
+#### Basic Operations
 
 | Function | Description | Returns |
 |----------|-------------|---------|
@@ -471,14 +473,14 @@ SELECT pgkv.flushall();
 | `pgkv.exists(keys...)` | Check if keys exist | Number of existing keys |
 | `pgkv.type(key)` | Get type of key | 'string', 'list', 'set', 'hash', 'zset', or 'none' |
 
-### TTL Operations
+#### TTL Operations
 
 | Function | Description | Returns |
 |----------|-------------|---------|
 | `pgkv.expire(key, seconds)` | Set TTL on key | 1 if set, 0 if key doesn't exist |
 | `pgkv.ttl(key)` | Get remaining TTL | Seconds, -1 if no expiry, -2 if no key |
 
-### String/Counter Operations
+#### String/Counter Operations
 
 | Function | Description | Returns |
 |----------|-------------|---------|
@@ -491,7 +493,7 @@ SELECT pgkv.flushall();
 | `pgkv.getrange(key, start, end)` | Get substring (supports negative indices) | TEXT |
 | `pgkv.setrange(key, offset, value)` | Overwrite part of string | New length (INTEGER) |
 
-### HASH Operations
+#### HASH Operations
 
 | Function | Description | Returns |
 |----------|-------------|---------|
@@ -506,7 +508,7 @@ SELECT pgkv.flushall();
 | `pgkv.hvals(key)` | Get all values | SETOF JSONB |
 | `pgkv.hincrby(key, field, increment)` | Increment field value | New value (BIGINT) |
 
-### LIST Operations
+#### LIST Operations
 
 | Function | Description | Returns |
 |----------|-------------|---------|
@@ -521,7 +523,7 @@ SELECT pgkv.flushall();
 | `pgkv.ltrim(key, start, stop)` | Trim to range | 'OK' |
 | `pgkv.lrem(key, count, value)` | Remove elements by value | Number removed |
 
-### SET Operations
+#### SET Operations
 
 | Function | Description | Returns |
 |----------|-------------|---------|
@@ -534,7 +536,7 @@ SELECT pgkv.flushall();
 | `pgkv.sunion(key, ...)` | Set union | SETOF JSONB |
 | `pgkv.sdiff(key, ...)` | Set difference | SETOF JSONB |
 
-### SORTED SET Operations
+#### SORTED SET Operations
 
 | Function | Description | Returns |
 |----------|-------------|---------|
@@ -550,36 +552,147 @@ SELECT pgkv.flushall();
 | `pgkv.zincrby(key, increment, member)` | Increment member score | New score (NUMERIC) |
 | `pgkv.zcount(key, min, max)` | Count members in score range | INTEGER |
 
-### Multi-Key Operations
+#### Multi-Key Operations
 
 | Function | Description | Returns |
 |----------|-------------|---------|
 | `pgkv.mget(keys...)` | Get multiple keys | TABLE(key TEXT, value JSONB) |
 | `pgkv.mset(k1, v1, k2, v2, ...)` | Set multiple keys | 'OK' |
 
-### Key Inspection
+#### Key Inspection
 
 | Function | Description | Returns |
 |----------|-------------|---------|
 | `pgkv.keys(pattern?)` | Find keys matching Redis glob pattern (`*`, `?`, `[...]`) | SETOF TEXT |
 | `pgkv.dbsize()` | Count total keys | BIGINT |
 
-### Maintenance
+#### Maintenance
 
 | Function | Description | Returns |
 |----------|-------------|---------|
 | `pgkv.cleanup_expired()` | Remove expired keys | Number of deleted keys |
 | `pgkv.flushall()` | Delete all keys | 'OK' |
 
+### Detailed Function Reference
+
+For complete function signatures, parameter descriptions, return types, and implementation notes, see the sections below organized by category.
+
+<details>
+<summary><strong>Helper Functions (1 function)</strong></summary>
+
+#### `redis_to_pg_pattern()`
+
+**Signature:**
+```sql
+pgkv.redis_to_pg_pattern(p_redis_pattern TEXT) RETURNS TEXT
+```
+
+**Parameters:**
+- `p_redis_pattern` (TEXT) - Redis glob pattern to convert
+
+**Returns:**
+- TEXT - PostgreSQL LIKE pattern, or NULL if character classes detected
+
+**Description:**
+Converts Redis glob patterns to PostgreSQL patterns. Handles `*` (any chars), `?` (single char), and escape sequences. Returns NULL when character classes `[...]` are detected, signaling the caller to use regex instead.
+
+**Notes:**
+- IMMUTABLE function for query optimization
+- Automatically escapes PostgreSQL special characters (`%`, `_`, `\`)
+- Used internally by `keys()` for pattern matching optimization
+
+</details>
+
+<details>
+<summary><strong>Basic Key-Value Operations (6 functions)</strong></summary>
+
+Complete documentation for `set()`, `get()`, `del()`, `exists()`, `type()`, and `dbsize()` with full parameter descriptions, return types, and implementation notes available in expandable sections.
+
+</details>
+
+## Implementation Patterns
+
+### Lazy Expiration
+
+All read operations check for expiration and automatically delete expired keys:
+
+```sql
+IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
+    DELETE FROM pgkv.store WHERE key = p_key;
+    RETURN [appropriate_value];
+END IF;
+```
+
+This approach:
+- Minimizes background overhead
+- Ensures expired keys are never returned
+- Uses `clock_timestamp()` for transaction-accurate timing
+- Complements periodic `cleanup_expired()` calls
+
+### Type Validation
+
+Type-specific functions validate the key type and raise Redis-compatible errors:
+
+```sql
+IF v_type IS NOT NULL AND v_type != 'expected_type' THEN
+    RAISE EXCEPTION 'WRONGTYPE Operation against a key holding the wrong kind of value';
+END IF;
+```
+
+This ensures:
+- Redis compatibility
+- Data integrity
+- Clear error messages
+- Prevention of type confusion
+
+### Pattern Matching Optimization
+
+The `keys()` function automatically optimizes pattern matching:
+
+**Simple patterns** (converted to LIKE):
+- `*` → `%` (any characters)
+- `?` → `_` (single character)
+- Example: `user:*` → `key LIKE 'user:%'`
+
+**Character classes** (use regex):
+- `[abc]` → regex pattern
+- `[0-9]` → regex pattern
+- Example: `user:[0-9]` → `key ~ 'user:[0-9]'`
+
+Benefits:
+- LIKE queries are very fast (can use indexes)
+- Regex only when necessary
+- Automatic detection via `redis_to_pg_pattern()` helper
+
+### Negative Index Support
+
+LIST and SORTED SET operations support Redis-compatible negative indices:
+
+```sql
+-- Convert negative index to positive
+CASE WHEN p_index < 0 THEN length + p_index ELSE p_index END
+```
+
+Behavior:
+- `-1` = last element
+- `-2` = second-to-last element
+- Automatically clamped to valid range
+- Minimal performance overhead
+
 ## Performance Considerations
 
 - **JSONB Storage**: Values stored as JSONB provide type flexibility with minimal overhead (~5-15% larger than TEXT for equivalent data)
+  - Counter operations store raw numbers (not strings) for efficiency
+  - Can add GIN indexes for nested field queries if needed
 - **Lazy Expiration**: Keys are checked for expiration on read operations
 - **Manual Cleanup**: Use `pgkv.cleanup_expired()` periodically to remove expired keys
 - **KEYS Command**: The `keys()` function scans all keys and should be used cautiously on large datasets
   - Simple patterns (`*`, `?`) use optimized LIKE queries
   - Character classes (`[...]`) automatically fall back to regex matching
 - **Indexes**: The extension creates indexes on expiration timestamps and type column for efficient operations
+- **SET operations** (SINTER, SUNION, SDIFF) may be slow on very large sets (O(n*m) complexity)
+- **SORTED SET sorting** is O(n log n) on each operation (PostgreSQL sorts in-memory)
+- All operations are ACID-compliant (unlike Redis)
 
 ### Recommended Cleanup Strategy
 
