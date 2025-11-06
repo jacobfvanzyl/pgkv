@@ -944,8 +944,8 @@ BEGIN
 
     -- Return all key-value pairs
     RETURN QUERY
-    SELECT key::TEXT, value
-    FROM jsonb_each(v_value);
+    SELECT kv.key::TEXT, kv.value
+    FROM jsonb_each(v_value) AS kv;
 END;
 $$;
 
