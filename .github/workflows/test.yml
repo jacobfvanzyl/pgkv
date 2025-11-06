@@ -54,7 +54,7 @@ jobs:
 
       - name: Run pgTAP tests
         run: |
-          for test_file in supabase/tests/*.sql; do
+          for test_file in tests/*.sql; do
             echo "Running $test_file..."
             docker exec -i postgres psql -U postgres -d test < "$test_file"
           done

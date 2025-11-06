@@ -600,7 +600,7 @@ Run tests using pgTAP:
 ```bash
 # Install pgTAP if not already installed
 # Then run tests
-pg_prove supabase/tests/*.sql
+pg_prove tests/*.sql
 ```
 
 ## License

@@ -21,12 +21,6 @@
 *.sublime-project
 *.sublime-workspace
 
-# Supabase local
-.branches
-.temp
-supabase/.branches
-supabase/.temp
-
 # PostgreSQL
 *.pgsql
 *.backup

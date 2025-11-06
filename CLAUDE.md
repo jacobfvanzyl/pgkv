@@ -152,29 +152,13 @@ docker exec -it postgres psql -U postgres
 docker exec postgres bash -c "apt-get update && apt-get install -y postgresql-16-pgtap"
 
 # Run all tests
-for test in supabase/tests/*.sql; do
+for test in tests/*.sql; do
   echo "Running $test..."
   docker exec -i postgres psql -U postgres < "$test"
 done
 
 # Run specific test
-docker exec -i postgres psql -U postgres < supabase/tests/01-basic-operations.sql
-```
-
-### Using Supabase CLI
-
-```bash
-# Start local Supabase
-supabase start
-
-# Link to project (optional)
-supabase link
-
-# Run tests
-supabase test db
-
-# Stop Supabase
-supabase stop
+docker exec -i postgres psql -U postgres < tests/01-basic-operations.sql
 ```
 
 ## File Structure
@@ -185,23 +169,20 @@ pgkv/
 ├── pgkv--0.1.0.sql                     # Version 0.1.0 implementation (~2,800 lines)
 ├── README.md                           # User documentation
 ├── CLAUDE.md                           # This file
-├── PROGRESS.md                         # Implementation progress tracker
 ├── LICENSE                             # MIT license
 ├── .gitignore                          # Git ignore rules
 ├── .github/
 │   └── workflows/
 │       └── test.yml                    # CI/CD testing (Postgres 12-16)
-└── supabase/
-    ├── config.toml                     # Supabase configuration
-    └── tests/
-        ├── 01-basic-operations.sql     # Basic command tests (25 tests)
-        ├── 02-ttl-functionality.sql    # TTL/expiration tests (14 tests)
-        ├── 03-advanced-commands.sql    # INCR/MGET/MSET/KEYS tests (30 tests)
-        ├── 04-hash-commands.sql        # HASH operations tests (35 tests)
-        ├── 05-list-commands.sql        # LIST operations tests (45 tests)
-        ├── 06-set-commands.sql         # SET operations tests (35 tests)
-        ├── 07-sorted-set-commands.sql  # SORTED SET operations tests (50 tests)
-        └── 08-string-additional.sql    # Additional string ops tests (30 tests)
+└── tests/
+    ├── 01-basic-operations.sql         # Basic command tests (25 tests)
+    ├── 02-ttl-functionality.sql        # TTL/expiration tests (14 tests)
+    ├── 03-advanced-commands.sql        # INCR/MGET/MSET/KEYS tests (30 tests)
+    ├── 04-hash-commands.sql            # HASH operations tests (35 tests)
+    ├── 05-list-commands.sql            # LIST operations tests (45 tests)
+    ├── 06-set-commands.sql             # SET operations tests (35 tests)
+    ├── 07-sorted-set-commands.sql      # SORTED SET operations tests (50 tests)
+    └── 08-string-additional.sql        # Additional string ops tests (30 tests)
 ```
 
 ## Modifying the Extension
@@ -219,7 +200,7 @@ pgkv/
    - Use `#>>'{}'` to extract as text
    - Counter values stored as raw JSONB numbers: `to_jsonb(42::bigint)`
 7. Update `README.md` with new function documentation
-8. Add tests to appropriate test file in `supabase/tests/`
+8. Add tests to appropriate test file in `tests/`
 
 ### Creating a New Version
 
