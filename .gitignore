@@ -1,0 +1,43 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+
+# Editor directories and files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Supabase local
+.branches
+.temp
+supabase/.branches
+supabase/.temp
+
+# PostgreSQL
+*.pgsql
+*.backup
+
+# Build artifacts
+*.o
+*.so
+*.bc
+
+# Test output
+regression.diffs
+regression.out
+log/
+tmp/

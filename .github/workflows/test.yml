@@ -1,0 +1,66 @@
+name: Test pgkv Extension
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        postgres-version: [12, 13, 14, 15, 16]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Start PostgreSQL ${{ matrix.postgres-version }}
+        run: |
+          docker run -d \
+            --name postgres \
+            -e POSTGRES_PASSWORD=postgres \
+            -e POSTGRES_DB=test \
+            -p 5432:5432 \
+            postgres:${{ matrix.postgres-version }}
+
+          # Wait for PostgreSQL to be ready
+          until docker exec postgres pg_isready -U postgres; do
+            sleep 1
+          done
+
+      - name: Install pgTAP
+        run: |
+          docker exec postgres bash -c "apt-get update && apt-get install -y postgresql-${{ matrix.postgres-version }}-pgtap"
+
+      - name: Copy extension files to container
+        run: |
+          docker cp pgkv.control postgres:/tmp/
+          docker cp pgkv--0.1.0.sql postgres:/tmp/
+
+      - name: Install extension
+        run: |
+          docker exec postgres bash -c "
+            cp /tmp/pgkv.control /usr/share/postgresql/${{ matrix.postgres-version }}/extension/
+            cp /tmp/pgkv--0.1.0.sql /usr/share/postgresql/${{ matrix.postgres-version }}/extension/
+          "
+
+      - name: Create extension in database
+        run: |
+          docker exec postgres psql -U postgres -d test -c "CREATE EXTENSION pgkv;"
+
+      - name: Run pgTAP tests
+        run: |
+          for test_file in supabase/tests/*.sql; do
+            echo "Running $test_file..."
+            docker exec -i postgres psql -U postgres -d test < "$test_file"
+          done
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker stop postgres
+          docker rm postgres

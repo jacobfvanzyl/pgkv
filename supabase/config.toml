@@ -1,0 +1,29 @@
+# Supabase configuration for pgkv extension
+
+[project]
+name = "pgkv"
+
+[db]
+port = 54322
+
+[db.pooler]
+enabled = false
+
+[api]
+enabled = true
+port = 54321
+
+[auth]
+enabled = false
+
+[storage]
+enabled = false
+
+[realtime]
+enabled = false
+
+[edge_runtime]
+enabled = false
+
+[analytics]
+enabled = false
