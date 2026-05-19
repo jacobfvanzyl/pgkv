@@ -20,6 +20,20 @@ A key-value store PostgreSQL Trusted Language Extension (TLE) that provides fami
 CREATE EXTENSION pgkv;
 ```
 
+The default extension version is `0.2.0`. To upgrade an existing `0.1.0` install:
+
+```sql
+ALTER EXTENSION pgkv UPDATE TO '0.2.0';
+```
+
+pgkv is packaged with PostgreSQL/pg_tle-style versioned scripts:
+
+- `pgkv--0.1.0.sql`
+- `pgkv--0.2.0.sql`
+- `pgkv--0.1.0--0.2.0.sql`
+
+Because objects intentionally live in the `pgkv` schema, the extension is not relocatable.
+
 ### Prerequisites
 
 - PostgreSQL 12 or higher
@@ -484,6 +498,96 @@ SELECT pgkv.cleanup_expired();
 -- Delete all keys
 SELECT pgkv.flushall();
 ```
+
+
+## Version 0.2.0 Additions
+
+pgkv 0.2.0 adds more Redis/Valkey-compatible helpers while keeping the 0.1.0 API compatible.
+
+### Cursor Scans
+
+Offset-style cursor scans provide deterministic iteration. Cursor `0` means complete.
+
+```sql
+SELECT * FROM pgkv.scan(0, 'user:*', 100);
+SELECT * FROM pgkv.hscan('hash', 0, '*', 100);
+SELECT * FROM pgkv.sscan('set', 0, '*', 100);
+SELECT * FROM pgkv.zscan('zset', 0, '*', 100);
+```
+
+### Extended String Commands
+
+```sql
+SELECT pgkv.setnx('key', 'value');              -- 1 if set, 0 if key exists
+SELECT pgkv.setex('key', 60, 'value');          -- SET with seconds TTL
+SELECT pgkv.psetex('key', 60000, 'value');      -- SET with milliseconds TTL
+SELECT pgkv.getdel('key');                      -- GET then DEL
+SELECT pgkv.getex('key', 60);                   -- GET then EXPIRE
+SELECT pgkv.incrbyfloat('float', 1.5);
+SELECT pgkv.msetnx('k1', 'v1', 'k2', 'v2');
+```
+
+Full SET options are exposed through `set_opts`:
+
+```sql
+SELECT pgkv.set_opts('key', 'value', p_nx := true);
+SELECT pgkv.set_opts('key', 'value', p_xx := true, p_get := true);
+SELECT pgkv.set_opts('key', 'value', p_ex := 60);
+SELECT pgkv.set_opts('key', 'value', p_px := 60000);
+SELECT pgkv.set_opts('key', 'value', p_keepttl := true);
+```
+
+### Extended List Commands
+
+```sql
+SELECT pgkv.lpushx('list', 'value');
+SELECT pgkv.rpushx('list', 'value');
+SELECT pgkv.linsert('list', 'BEFORE', 'pivot', 'value');
+SELECT pgkv.lpos('list', 'value');
+SELECT pgkv.lmove('source', 'destination', 'LEFT', 'RIGHT');
+SELECT pgkv.rpoplpush('source', 'destination');
+```
+
+Blocking list commands (`BLPOP`, `BRPOP`) are intentionally not implemented in 0.2.0 because PostgreSQL polling/timeout behavior would not be Redis-identical.
+
+### Extended Sorted Set Commands
+
+```sql
+SELECT * FROM pgkv.zmscore('zset', 'a', 'b', 'missing');
+SELECT * FROM pgkv.zpopmin('zset', 2);
+SELECT * FROM pgkv.zpopmax('zset', 2);
+SELECT pgkv.zremrangebyrank('zset', 0, 10);
+SELECT pgkv.zremrangebyscore('zset', 100, 200);
+SELECT pgkv.zrangestore('dst', 'src', 0, -1, false);
+SELECT pgkv.zunionstore('dst', ARRAY['z1', 'z2']);
+SELECT pgkv.zinterstore('dst', ARRAY['z1', 'z2']);
+SELECT pgkv.zdiffstore('dst', ARRAY['z1', 'z2']);
+```
+
+`zunionstore` and `zinterstore` support optional weights and aggregate mode (`SUM`, `MIN`, `MAX`).
+
+### JSONB Commands
+
+pgkv 0.2.0 adds a `json` storage type with PostgreSQL-array paths.
+
+```sql
+SELECT pgkv.json_set('doc', NULL, '{"name":"Ada","tags":["math"]}'::jsonb);
+SELECT pgkv.json_get('doc', ARRAY['name']);
+SELECT pgkv.json_type('doc', ARRAY['tags']);
+SELECT * FROM pgkv.json_objkeys('doc');
+SELECT pgkv.json_arrappend('doc', ARRAY['tags'], '"logic"'::jsonb);
+SELECT pgkv.json_del('doc', ARRAY['name']);
+```
+
+### Security Hardening
+
+All `SECURITY DEFINER` functions set a fixed function-level search path:
+
+```sql
+SET search_path = pgkv, pg_temp
+```
+
+This prevents caller `search_path` hijacking.
 
 ## API Reference
 

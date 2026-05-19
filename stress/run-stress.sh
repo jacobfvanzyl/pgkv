@@ -21,8 +21,10 @@ docker run -d --name "$CONTAINER" -e POSTGRES_PASSWORD=postgres -p "${PORT}:5432
 until docker exec "$CONTAINER" pg_isready -h 127.0.0.1 -U postgres >/dev/null 2>&1; do sleep 0.25; done
 
 docker cp pgkv.control "$CONTAINER:/tmp/pgkv.control"
-docker cp pgkv--0.1.0.sql "$CONTAINER:/tmp/pgkv--0.1.0.sql"
-docker exec "$CONTAINER" bash -lc 'cp /tmp/pgkv.control /usr/share/postgresql/*/extension/ && cp /tmp/pgkv--0.1.0.sql /usr/share/postgresql/*/extension/'
+for sql in pgkv--*.sql; do
+  docker cp "$sql" "$CONTAINER:/tmp/$sql"
+done
+docker exec "$CONTAINER" bash -lc 'cp /tmp/pgkv.control /usr/share/postgresql/*/extension/ && cp /tmp/pgkv--*.sql /usr/share/postgresql/*/extension/'
 docker exec "$CONTAINER" psql -h localhost -U postgres -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION pgkv;'
 
 if command -v uv >/dev/null 2>&1; then
