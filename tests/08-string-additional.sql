@@ -6,7 +6,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
 -- Plan the number of tests
-SELECT plan(30);
+SELECT plan(33);
 
 -- ============================================================================
 -- Additional String Operations (APPEND, STRLEN, GETRANGE, SETRANGE)

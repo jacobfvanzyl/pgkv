@@ -1,13 +1,12 @@
 # pgkv
 
-A Redis-like key-value store PostgreSQL Trusted Language Extension (TLE) that provides familiar Redis commands directly in your PostgreSQL database.
+A key-value store PostgreSQL Trusted Language Extension (TLE) that provides familiar Redis commands directly in your PostgreSQL database.
 
 ## Features
 
 - **Redis-Compatible API**: Familiar commands like SET, GET, DEL, INCR, EXPIRE, and more
 - **JSONB Storage**: Values stored as JSONB for type flexibility and rich querying capabilities
-- **Redis Pattern Matching**: Full support for Redis glob patterns (`*`, `?`, `[...]`)
-- **Type System**: Track data types (string, list, set, hash, zset) for future Redis command compatibility
+- **Pattern Matching**: Full support for Redis glob patterns (`*`, `?`, `[...]`)
 - **TTL Support**: Automatic expiration of keys with time-to-live functionality
 - **Trusted Language Extension**: Written in PL/pgSQL, safe to run in restricted environments
 - **PostgreSQL Native**: Leverage PostgreSQL's ACID guarantees and consistency
@@ -25,6 +24,33 @@ CREATE EXTENSION pgkv;
 
 - PostgreSQL 12 or higher
 - PL/pgSQL language support (enabled by default)
+
+## Security Model
+
+pgkv uses a secure permission model that provides safe access to the key-value store:
+
+- **Function-Based Access**: All operations go through provided functions - users cannot directly access the underlying storage table
+- **SECURITY DEFINER Functions**: Functions execute with the extension owner's privileges, allowing them to access the internal `pgkv.store` table on behalf of any user
+- **No Direct Table Access**: Regular users do not need (and should not have) direct permissions on the `pgkv.store` table
+- **Controlled API**: All data access is controlled through the well-defined function API, preventing unauthorized table manipulation
+
+This model ensures that:
+- Any user can safely call pgkv functions (e.g., `pgkv.set()`, `pgkv.get()`)
+- The underlying storage remains protected from direct SQL manipulation
+- All operations maintain data integrity through the function layer
+- No additional permission grants are needed for end users
+
+**Example:**
+
+```sql
+-- Regular user can call functions without table permissions
+SELECT pgkv.set('mykey', 'myvalue');  -- ✓ Works
+SELECT pgkv.get('mykey');             -- ✓ Works
+
+-- But cannot directly access the storage table
+SELECT * FROM pgkv.store;             -- ✗ Permission denied
+INSERT INTO pgkv.store VALUES (...);  -- ✗ Permission denied
+```
 
 ## JSONB Storage
 
@@ -583,20 +609,24 @@ For complete function signatures, parameter descriptions, return types, and impl
 #### `redis_to_pg_pattern()`
 
 **Signature:**
+
 ```sql
 pgkv.redis_to_pg_pattern(p_redis_pattern TEXT) RETURNS TEXT
 ```
 
 **Parameters:**
+
 - `p_redis_pattern` (TEXT) - Redis glob pattern to convert
 
 **Returns:**
+
 - TEXT - PostgreSQL LIKE pattern, or NULL if character classes detected
 
 **Description:**
 Converts Redis glob patterns to PostgreSQL patterns. Handles `*` (any chars), `?` (single char), and escape sequences. Returns NULL when character classes `[...]` are detected, signaling the caller to use regex instead.
 
 **Notes:**
+
 - IMMUTABLE function for query optimization
 - Automatically escapes PostgreSQL special characters (`%`, `_`, `\`)
 - Used internally by `keys()` for pattern matching optimization
@@ -624,6 +654,7 @@ END IF;
 ```
 
 This approach:
+
 - Minimizes background overhead
 - Ensures expired keys are never returned
 - Uses `clock_timestamp()` for transaction-accurate timing
@@ -640,6 +671,7 @@ END IF;
 ```
 
 This ensures:
+
 - Redis compatibility
 - Data integrity
 - Clear error messages
@@ -650,16 +682,19 @@ This ensures:
 The `keys()` function automatically optimizes pattern matching:
 
 **Simple patterns** (converted to LIKE):
+
 - `*` → `%` (any characters)
 - `?` → `_` (single character)
 - Example: `user:*` → `key LIKE 'user:%'`
 
 **Character classes** (use regex):
+
 - `[abc]` → regex pattern
 - `[0-9]` → regex pattern
 - Example: `user:[0-9]` → `key ~ 'user:[0-9]'`
 
 Benefits:
+
 - LIKE queries are very fast (can use indexes)
 - Regex only when necessary
 - Automatic detection via `redis_to_pg_pattern()` helper
@@ -674,6 +709,7 @@ CASE WHEN p_index < 0 THEN length + p_index ELSE p_index END
 ```
 
 Behavior:
+
 - `-1` = last element
 - `-2` = second-to-last element
 - Automatically clamped to valid range

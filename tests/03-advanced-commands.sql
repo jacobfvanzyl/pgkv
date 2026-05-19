@@ -6,7 +6,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
 
 -- Plan the number of tests
-SELECT plan(30);
+SELECT plan(35);
 
 -- ============================================================================
 -- Counter Operations (INCR, DECR, INCRBY, DECRBY)
@@ -138,7 +138,7 @@ SELECT results_eq(
 -- Test Redis ? wildcard
 SELECT is(pgkv.set('user:a', 'test'), 'OK', 'SET user:a');
 SELECT ok(
-    (SELECT COUNT(*) FROM pgkv.keys('user:?') = 3),
+    ((SELECT COUNT(*) FROM pgkv.keys('user:?')) = 3),
     'KEYS with ? should match single character'
 );
 
@@ -152,7 +152,7 @@ SELECT results_eq(
 );
 
 -- Test DBSIZE function
-SELECT has_function('pgkv', 'dbsize', NULL, 'pgkv.dbsize function should exist');
+SELECT has_function('pgkv', 'dbsize', ARRAY[]::text[], 'pgkv.dbsize function should exist');
 
 SELECT ok(
     pgkv.dbsize() >= 3,
@@ -164,10 +164,10 @@ SELECT ok(
 -- ============================================================================
 
 -- Test CLEANUP_EXPIRED function
-SELECT has_function('pgkv', 'cleanup_expired', NULL, 'pgkv.cleanup_expired function should exist');
+SELECT has_function('pgkv', 'cleanup_expired', ARRAY[]::text[], 'pgkv.cleanup_expired function should exist');
 
 -- Test FLUSHALL function
-SELECT has_function('pgkv', 'flushall', NULL, 'pgkv.flushall function should exist');
+SELECT has_function('pgkv', 'flushall', ARRAY[]::text[], 'pgkv.flushall function should exist');
 
 SELECT is(
     pgkv.flushall(),

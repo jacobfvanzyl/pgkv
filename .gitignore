@@ -35,3 +35,9 @@ regression.diffs
 regression.out
 log/
 tmp/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv-stress/

@@ -32,6 +32,7 @@ CREATE OR REPLACE FUNCTION pgkv.redis_to_pg_pattern(p_redis_pattern TEXT)
 RETURNS TEXT
 LANGUAGE plpgsql
 IMMUTABLE
+SECURITY DEFINER
 AS $$
 DECLARE
     v_result TEXT := '';
@@ -90,6 +91,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.set(p_key TEXT, p_value TEXT, p_ttl_seconds INTEGER DEFAULT NULL)
 RETURNS TEXT
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 BEGIN
     INSERT INTO pgkv.store (key, value, type, expires_at, updated_at)
@@ -118,6 +120,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.get(p_key TEXT)
 RETURNS JSONB
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -152,6 +155,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.del(VARIADIC p_keys TEXT[])
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_deleted INTEGER;
@@ -166,6 +170,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.exists(VARIADIC p_keys TEXT[])
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_count INTEGER;
@@ -202,6 +207,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.expire(p_key TEXT, p_seconds INTEGER)
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_updated INTEGER;
@@ -221,6 +227,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.ttl(p_key TEXT)
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_expires_at TIMESTAMPTZ;
@@ -262,53 +269,10 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.incr(p_key TEXT)
 RETURNS BIGINT
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
-DECLARE
-    v_value JSONB;
-    v_numeric BIGINT;
-    v_type TEXT;
-    v_expires_at TIMESTAMPTZ;
 BEGIN
-    -- Get current value and type
-    SELECT value, type, expires_at INTO v_value, v_type, v_expires_at
-    FROM pgkv.store
-    WHERE key = p_key;
-
-    -- If key doesn't exist, start from 0
-    IF NOT FOUND THEN
-        v_numeric := 0;
-    ELSE
-        -- Check if expired
-        IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
-            DELETE FROM pgkv.store WHERE key = p_key;
-            v_numeric := 0;
-        ELSE
-            -- Verify type is string
-            IF v_type != 'string' THEN
-                RAISE EXCEPTION 'WRONGTYPE Operation against a key holding the wrong kind of value';
-            END IF;
-
-            -- Try to convert JSONB value to integer
-            BEGIN
-                v_numeric := (v_value #>> '{}')::BIGINT;
-            EXCEPTION WHEN OTHERS THEN
-                RAISE EXCEPTION 'value is not an integer or out of range';
-            END;
-        END IF;
-    END IF;
-
-    -- Increment
-    v_numeric := v_numeric + 1;
-
-    -- Store as raw JSONB number
-    INSERT INTO pgkv.store (key, value, type, updated_at)
-    VALUES (p_key, to_jsonb(v_numeric), 'string', NOW())
-    ON CONFLICT (key) DO UPDATE
-    SET value = EXCLUDED.value,
-        type = EXCLUDED.type,
-        updated_at = NOW();
-
-    RETURN v_numeric;
+    RETURN pgkv.incrby(p_key, 1);
 END;
 $$;
 
@@ -317,6 +281,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.decr(p_key TEXT)
 RETURNS BIGINT
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 BEGIN
     RETURN pgkv.incrby(p_key, -1);
@@ -328,6 +293,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.incrby(p_key TEXT, p_increment BIGINT)
 RETURNS BIGINT
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -335,6 +301,9 @@ DECLARE
     v_type TEXT;
     v_expires_at TIMESTAMPTZ;
 BEGIN
+    -- Serialize counter updates per key to prevent lost updates under concurrency.
+    PERFORM pg_advisory_xact_lock(hashtextextended('pgkv:' || p_key, 0));
+
     -- Get current value and type
     SELECT value, type, expires_at INTO v_value, v_type, v_expires_at
     FROM pgkv.store
@@ -382,6 +351,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.decrby(p_key TEXT, p_decrement BIGINT)
 RETURNS BIGINT
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 BEGIN
     RETURN pgkv.incrby(p_key, -p_decrement);
@@ -397,6 +367,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.mget(VARIADIC p_keys TEXT[])
 RETURNS TABLE(key TEXT, value JSONB)
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_key TEXT;
@@ -421,6 +392,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.mset(VARIADIC p_pairs TEXT[])
 RETURNS TEXT
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_i INTEGER;
@@ -450,6 +422,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.keys(p_pattern TEXT DEFAULT '*')
 RETURNS SETOF TEXT
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_pg_pattern TEXT;
@@ -484,6 +457,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.type(p_key TEXT)
 RETURNS TEXT
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_type TEXT;
@@ -513,6 +487,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.append(p_key TEXT, p_value TEXT)
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_type TEXT;
@@ -569,6 +544,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.strlen(p_key TEXT)
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_type TEXT;
@@ -610,6 +586,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.getrange(p_key TEXT, p_start INTEGER, p_end INTEGER)
 RETURNS TEXT
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_type TEXT;
@@ -671,6 +648,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.setrange(p_key TEXT, p_offset INTEGER, p_value TEXT)
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_type TEXT;
@@ -763,6 +741,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.hset(p_key TEXT, VARIADIC p_pairs TEXT[])
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_type TEXT;
@@ -831,6 +810,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.hget(p_key TEXT, p_field TEXT)
 RETURNS JSONB
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -864,6 +844,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.hmget(p_key TEXT, VARIADIC p_fields TEXT[])
 RETURNS TABLE(field TEXT, value JSONB)
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -917,6 +898,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.hgetall(p_key TEXT)
 RETURNS TABLE(field TEXT, value JSONB)
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -953,6 +935,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.hdel(p_key TEXT, VARIADIC p_fields TEXT[])
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -1006,6 +989,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.hexists(p_key TEXT, p_field TEXT)
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -1039,6 +1023,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.hlen(p_key TEXT)
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -1072,6 +1057,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.hkeys(p_key TEXT)
 RETURNS SETOF TEXT
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -1106,6 +1092,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.hvals(p_key TEXT)
 RETURNS SETOF JSONB
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -1140,6 +1127,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.hincrby(p_key TEXT, p_field TEXT, p_increment BIGINT)
 RETURNS BIGINT
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -1208,6 +1196,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.lpush(p_key TEXT, VARIADIC p_values TEXT[])
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -1261,6 +1250,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.rpush(p_key TEXT, VARIADIC p_values TEXT[])
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -1311,6 +1301,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.lpop(p_key TEXT, p_count INTEGER DEFAULT 1)
 RETURNS SETOF JSONB
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -1368,6 +1359,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.rpop(p_key TEXT, p_count INTEGER DEFAULT 1)
 RETURNS SETOF JSONB
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -1425,6 +1417,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.llen(p_key TEXT)
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -1458,6 +1451,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.lrange(p_key TEXT, p_start INTEGER, p_stop INTEGER)
 RETURNS SETOF JSONB
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -1509,6 +1503,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.lindex(p_key TEXT, p_index INTEGER)
 RETURNS JSONB
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -1554,6 +1549,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.lset(p_key TEXT, p_index INTEGER, p_value TEXT)
 RETURNS TEXT
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -1606,6 +1602,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.ltrim(p_key TEXT, p_start INTEGER, p_stop INTEGER)
 RETURNS TEXT
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -1674,6 +1671,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.lrem(p_key TEXT, p_count INTEGER, p_value TEXT)
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -1754,6 +1752,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.sadd(p_key TEXT, VARIADIC p_members TEXT[])
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -1816,6 +1815,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.srem(p_key TEXT, VARIADIC p_members TEXT[])
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -1886,6 +1886,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.smembers(p_key TEXT)
 RETURNS SETOF JSONB
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -1920,6 +1921,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.sismember(p_key TEXT, p_member TEXT)
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -1959,6 +1961,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.scard(p_key TEXT)
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_value JSONB;
@@ -1992,6 +1995,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.sinter(VARIADIC p_keys TEXT[])
 RETURNS SETOF JSONB
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_first_key TEXT;
@@ -2072,6 +2076,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.sunion(VARIADIC p_keys TEXT[])
 RETURNS SETOF JSONB
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_key TEXT;
@@ -2123,6 +2128,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.sdiff(VARIADIC p_keys TEXT[])
 RETURNS SETOF JSONB
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_first_key TEXT;
@@ -2216,6 +2222,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.zadd(p_key TEXT, VARIADIC p_pairs TEXT[])
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_type TEXT;
@@ -2285,6 +2292,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.zrem(p_key TEXT, VARIADIC p_members TEXT[])
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_type TEXT;
@@ -2338,6 +2346,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.zrange(p_key TEXT, p_start INTEGER, p_stop INTEGER, p_withscores BOOLEAN DEFAULT FALSE)
 RETURNS TABLE(member TEXT, score NUMERIC)
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_type TEXT;
@@ -2405,6 +2414,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.zrevrange(p_key TEXT, p_start INTEGER, p_stop INTEGER, p_withscores BOOLEAN DEFAULT FALSE)
 RETURNS TABLE(member TEXT, score NUMERIC)
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_type TEXT;
@@ -2471,6 +2481,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.zscore(p_key TEXT, p_member TEXT)
 RETURNS NUMERIC
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_type TEXT;
@@ -2511,6 +2522,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.zcard(p_key TEXT)
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_type TEXT;
@@ -2544,6 +2556,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.zrank(p_key TEXT, p_member TEXT)
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_type TEXT;
@@ -2592,6 +2605,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.zrevrank(p_key TEXT, p_member TEXT)
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_type TEXT;
@@ -2641,6 +2655,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.zrangebyscore(p_key TEXT, p_min NUMERIC, p_max NUMERIC, p_withscores BOOLEAN DEFAULT FALSE)
 RETURNS TABLE(member TEXT, score NUMERIC)
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_type TEXT;
@@ -2681,6 +2696,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.zincrby(p_key TEXT, p_increment NUMERIC, p_member TEXT)
 RETURNS NUMERIC
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_type TEXT;
@@ -2741,6 +2757,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.zcount(p_key TEXT, p_min NUMERIC, p_max NUMERIC)
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_type TEXT;
@@ -2783,6 +2800,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.cleanup_expired()
 RETURNS INTEGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_deleted INTEGER;
@@ -2799,6 +2817,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.flushall()
 RETURNS TEXT
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 BEGIN
     TRUNCATE TABLE pgkv.store;
@@ -2810,6 +2829,7 @@ $$;
 CREATE OR REPLACE FUNCTION pgkv.dbsize()
 RETURNS BIGINT
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
 DECLARE
     v_count BIGINT;
@@ -2826,14 +2846,29 @@ $$;
 -- Security: Set appropriate permissions
 -- ============================================================================
 
--- Revoke all permissions from public on the schema
-REVOKE ALL ON SCHEMA pgkv FROM PUBLIC;
-
--- Grant usage on schema to public
+-- Schema access for public
 GRANT USAGE ON SCHEMA pgkv TO PUBLIC;
 
--- Grant execute on all functions to public
+-- Function execution access
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgkv TO PUBLIC;
 
--- Revoke direct table access from public (must use functions)
+-- Explicitly prevent direct table manipulation
 REVOKE ALL ON pgkv.store FROM PUBLIC;
+
+-- Ensure future functions are accessible (critical for upgrades)
+ALTER DEFAULT PRIVILEGES IN SCHEMA pgkv
+    GRANT EXECUTE ON FUNCTIONS TO PUBLIC;
+
+-- Ensure future tables remain protected
+ALTER DEFAULT PRIVILEGES IN SCHEMA pgkv
+    REVOKE ALL ON TABLES FROM PUBLIC;
+
+-- Monitoring access (following pgmq pattern)
+GRANT SELECT ON pgkv.store TO pg_monitor;
+ALTER DEFAULT PRIVILEGES IN SCHEMA pgkv
+    GRANT SELECT ON TABLES TO pg_monitor;
+
+-- Protect sequences (if added in future)
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA pgkv FROM PUBLIC;
+ALTER DEFAULT PRIVILEGES IN SCHEMA pgkv
+    REVOKE ALL ON SEQUENCES FROM PUBLIC;
