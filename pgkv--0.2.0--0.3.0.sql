@@ -306,8 +306,11 @@ AS $$
 DECLARE
     v_deleted INTEGER;
 BEGIN
-    WITH deleted AS (
-        DELETE FROM pgkv.store s WHERE s.key = ANY(p_keys) RETURNING s.expires_at
+    -- Lock the rows in key order first, so two multi-key calls cannot deadlock each other.
+    WITH locked AS (
+        SELECT s.key FROM pgkv.store s WHERE s.key = ANY(p_keys) ORDER BY s.key COLLATE "C" FOR UPDATE
+    ), deleted AS (
+        DELETE FROM pgkv.store s USING locked l WHERE s.key = l.key RETURNING s.expires_at
     )
     SELECT COUNT(*)::integer INTO v_deleted
     FROM deleted d
@@ -522,25 +525,33 @@ $$;
 
 -- MSET: Set multiple keys to multiple values
 -- Input format: array of key-value pairs like ARRAY['key1', 'val1', 'key2', 'val2']
+-- One statement, written in key order so two calls cannot deadlock each other. If a key is
+-- given more than once, its last value wins.
 CREATE OR REPLACE FUNCTION pgkv.mset(VARIADIC p_pairs TEXT[])
 RETURNS TEXT
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pgkv, pg_temp
 AS $$
-DECLARE
-    v_i INTEGER;
 BEGIN
     -- Ensure we have an even number of arguments
     IF array_length(p_pairs, 1) % 2 != 0 THEN
         RAISE EXCEPTION 'wrong number of arguments for MSET';
     END IF;
 
-    -- Set each key-value pair
-    FOR v_i IN 1..array_length(p_pairs, 1) BY 2
-    LOOP
-        PERFORM pgkv.set(p_pairs[v_i], p_pairs[v_i + 1]);
-    END LOOP;
+    INSERT INTO pgkv.store AS s (key, value, type, expires_at, updated_at)
+    SELECT d.k, to_jsonb(d.v), 'string', NULL, NOW()
+    FROM (
+        SELECT DISTINCT ON (p_pairs[i]) p_pairs[i] AS k, p_pairs[i + 1] AS v
+        FROM generate_series(1, array_length(p_pairs, 1), 2) AS i
+        ORDER BY p_pairs[i], i DESC
+    ) d
+    ORDER BY d.k COLLATE "C"
+    ON CONFLICT (key) DO UPDATE
+    SET value = EXCLUDED.value,
+        type = EXCLUDED.type,
+        expires_at = EXCLUDED.expires_at,
+        updated_at = NOW();
 
     RETURN 'OK';
 END;

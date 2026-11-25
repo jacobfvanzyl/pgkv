@@ -494,3 +494,31 @@ def test_repeatable_read_reports_a_lost_race_instead_of_losing_the_write(dsn, kv
             a.execute("SELECT pgkv.hset('h', 'a', '1')")
         a.rollback()
     assert scalar(kv, "SELECT pgkv.hlen('h')") == (2 if existing else 1)
+
+
+# --- multi-key commands lock in key order -------------------------------------------------------
+
+
+def test_multi_key_commands_in_opposite_order_do_not_deadlock(dsn, kv):
+    scalar(kv, "SELECT pgkv.rpush('l1', 'x')")
+    commands = [
+        ("SELECT pgkv.mset('a', '1', 'b', '1')", "SELECT pgkv.mset('b', '2', 'a', '2')"),
+        ("SELECT pgkv.del('a', 'b')", "SELECT pgkv.del('b', 'a')"),
+        ("SELECT pgkv.msetnx('a', '1', 'b', '1')", "SELECT pgkv.msetnx('b', '2', 'a', '2')"),
+        ("SELECT pgkv.lmove('l1', 'l2', 'LEFT', 'RIGHT')", "SELECT pgkv.lmove('l2', 'l1', 'LEFT', 'RIGHT')"),
+        ("SELECT pgkv.zunionstore('z1', ARRAY['z2'])", "SELECT pgkv.zunionstore('z2', ARRAY['z1'])"),
+    ]
+
+    def work(worker):
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            for i in range(150):
+                conn.execute(commands[i % len(commands)][worker % 2]).fetchall()
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(work, range(8)))  # a deadlock would raise DeadlockDetected here
+
+
+def test_mset_is_one_write(dsn, kv):
+    scalar(kv, "SELECT pgkv.mset('a', '0', 'b', '0')")
+    interleave(dsn, "SELECT pgkv.mset('a', '1', 'b', '1')", "SELECT pgkv.mset('b', '2', 'a', '2')")
+    assert text(kv, 'a') == text(kv, 'b') == '2'

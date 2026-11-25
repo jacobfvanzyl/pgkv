@@ -6,4 +6,4 @@
 - Before release, verify both direct install and upgrade path:
   - `CREATE EXTENSION pgkv;`
   - `CREATE EXTENSION pgkv VERSION 'old'; ALTER EXTENSION pgkv UPDATE TO 'new';`
-- Run `./stress/run-stress.sh` and pgTAP tests before committing.
+- Run `./stress/run-stress.sh` and pgTAP tests before committing. `stress/test_atomicity.py` holds the two-session tests: a function that reads a key and then writes it needs one there.

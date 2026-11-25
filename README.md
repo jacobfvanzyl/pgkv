@@ -20,17 +20,19 @@ A key-value store PostgreSQL Trusted Language Extension (TLE) that provides fami
 CREATE EXTENSION pgkv;
 ```
 
-The default extension version is `0.2.0`. To upgrade an existing `0.1.0` install:
+The default extension version is `0.3.0`. To upgrade an existing install (from `0.1.0` or `0.2.0`):
 
 ```sql
-ALTER EXTENSION pgkv UPDATE TO '0.2.0';
+ALTER EXTENSION pgkv UPDATE TO '0.3.0';
 ```
 
 pgkv is packaged with PostgreSQL/pg_tle-style versioned scripts:
 
-- `pgkv--0.1.0.sql`
-- `pgkv--0.2.0.sql`
-- `pgkv--0.1.0--0.2.0.sql`
+- `pgkv--0.1.0.sql`, `pgkv--0.2.0.sql`, `pgkv--0.3.0.sql`
+- `pgkv--0.1.0--0.2.0.sql`, `pgkv--0.2.0--0.3.0.sql`
+
+See [Upgrading to 0.3.0](#upgrading-to-030) for installs that applied pgkv as plain SQL, and
+[CHANGELOG.md](CHANGELOG.md) for what changed.
 
 Because objects intentionally live in the `pgkv` schema, the extension is not relocatable.
 
@@ -53,6 +55,18 @@ This model ensures that:
 - The underlying storage remains protected from direct SQL manipulation
 - All operations maintain data integrity through the function layer
 - No additional permission grants are needed for end users
+
+**One shared keyspace.** pgkv has no per-user keys. `EXECUTE` on its functions is granted to
+`PUBLIC`, so every role that can reach the `pgkv` schema can read, overwrite and delete every
+key. Do not expose the `pgkv` schema through an API that maps end users to database roles
+(PostgREST, as in Supabase) unless that is what you want. To restrict it to one role:
+
+```sql
+REVOKE ALL ON SCHEMA pgkv FROM PUBLIC;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA pgkv FROM PUBLIC;
+GRANT USAGE ON SCHEMA pgkv TO my_app_role;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgkv TO my_app_role;
+```
 
 **Example:**
 
@@ -589,6 +603,134 @@ SET search_path = pgkv, pg_temp
 
 This prevents caller `search_path` hijacking.
 
+## Version 0.3.0: Atomic Operations
+
+0.3.0 fixes concurrency bugs in 0.2.0 and earlier, and adds compare-and-set and a prefix scan.
+No function changed its signature.
+
+### Concurrency guarantees
+
+At PostgreSQL's default isolation level (READ COMMITTED), every pgkv function that writes is
+atomic with respect to every other pgkv function on the same key: the result is what you
+would get if the calls had run one after the other, and no acknowledged write is lost.
+
+- **One statement** where that is enough: `set`, `getdel` (`DELETE ... RETURNING`),
+  `set_opts`/`setnx` with NX (`INSERT ... ON CONFLICT ... WHERE` the existing key has expired)
+  or XX (a conditional `UPDATE`), `cas`, `cad`, `expire`, `del`.
+- **A row lock** where the function has to read the value to compute the new one:
+  `incr`/`decr`/`incrby`/`decrby`/`incrbyfloat`, `append`, `setrange`, `getex`, `set_opts` with
+  GET, `msetnx`, and every hash, list, set, sorted-set and JSON mutator. They take the key's
+  row `FOR UPDATE` first; for a key that does not exist yet they insert a placeholder row
+  that only their own transaction can see, so two sessions creating the same key also queue.
+- **Several keys** (`mset`, `msetnx`, `del`, `lmove`, `rpoplpush`, `zrangestore`,
+  `zunionstore`, `zinterstore`, `zdiffstore`) are locked in key order, so two such calls
+  cannot deadlock each other. `mset` is one statement. The `*store` commands share-lock
+  their sources while they read them.
+- **An expired key is absent** for every write: NX succeeds on it, XX and `expire` do not
+  revive it, `del` does not count it.
+- **Reads never destroy a write.** A read that finds an expired key still removes it (see
+  [Lazy Expiration](#lazy-expiration)), but only if it is still expired at that moment.
+
+Locks are held until the calling transaction ends, like any row lock. In a transaction that
+touches several keys, touch them in a consistent order or be ready to retry on a deadlock
+error. At REPEATABLE READ or SERIALIZABLE, a write that lost a race fails with a
+serialization error (`40001`) to be retried, as PostgreSQL does for any row.
+
+### Compare-and-set and compare-and-delete
+
+```sql
+-- Write only if the key still holds what was read. Returns 1 if it wrote, 0 if not.
+SELECT pgkv.cas('grant:42', '{"v":1}', '{"v":2}');
+
+-- With an expiry (same options as set_opts): p_ex, p_px, p_exat, p_pxat, p_keepttl
+SELECT pgkv.cas('grant:42', '{"v":2}', '{"v":3}', p_exat => 1790000000);
+
+-- A NULL expected value means "only if the key does not exist"
+SELECT pgkv.cas('code:abc', NULL, 'issued');
+
+-- Delete only if the key still holds what was read
+SELECT pgkv.cad('code:abc', 'issued');
+```
+
+`cas(key, expected, value, ...)` and `cad(key, expected)` are **pgkv extensions, not classic
+Redis commands**. They exist for optimistic concurrency: read a value, decide, and write back
+only if nobody changed it in between. Of several sessions that read the same value, exactly
+one `cas` returns 1; the others return 0 and can re-read. That is what makes a one-time code
+single-use or a token rotation safe.
+
+- The expected value is compared as text with what `pgkv.get(key) #>> '{}'` returns, so pass
+  what you read. They work on string keys only; another type raises `WRONGTYPE`.
+- `cas` with a NULL expected value is `SET NX`: NULL is what `get` returns for a missing key,
+  so "what I read" works in both cases. An expired key counts as missing.
+- Without an expiry option `cas` clears the key's expiry, as `SET` does; pass
+  `p_keepttl => true` to keep it.
+- Both return 1 or 0, like `setnx` and `expire`.
+- Why these names: Redis had no such command for most of its life (the idiom was
+  `WATCH`/`MULTI` or a Lua script). Redis 8.4 added `SET key value IFEQ expected` and
+  `DELEX key IFEQ expected`, which is what `cas` and `cad` do. They are separate functions
+  rather than more `set_opts` options so that the answer is a plain 1 or 0 and `set_opts`
+  keeps its signature. The names follow the long-standing `CAS`/`CAD` usage.
+- Comparing values cannot tell "unchanged" from "changed and changed back" (ABA). If that
+  matters, put a version or a random nonce in the value.
+
+### Prefix scan
+
+```sql
+-- Keys that start with 'grant:', 100 at a time, in byte order
+SELECT key, type, value, expires_at FROM pgkv.scan_prefix('grant:', NULL, 100);
+-- Next page: pass the last key of the previous one. A short page is the last.
+SELECT key, type, value, expires_at FROM pgkv.scan_prefix('grant:', 'grant:0099', 100);
+```
+
+`scan_prefix(prefix, after, count)` is also a pgkv extension. It pages by key (keyset paging),
+so keys added or removed during a sweep never shift, repeat or hide other keys, which
+`scan`'s offset cursor cannot promise. The prefix is literal (`%`, `_`, `*` have no special
+meaning). It reads a range of the `idx_pgkv_key_pattern` index (`text_pattern_ops`), returns
+each key's type, value and expiry so a listing needs no second query per key, skips expired
+keys and writes nothing.
+
+`scan(cursor, pattern, count)` keeps its signature and offset cursor, but no longer counts
+the matching keys or deletes expired keys across the whole table on every call, and a
+pattern with a fixed prefix (`grant:*`) uses the same index. Its order is now byte order
+rather than the database collation's.
+
+### Behaviour changes from 0.2.0
+
+- `set_opts(..., p_nx => true, p_get => true)` returns the existing value when the key exists
+  (and sets nothing), and NULL when it set the key, as Redis 7 does. 0.2.0 returned NULL in
+  both cases.
+- `del` does not count keys that had already expired; `expire` returns 0 for them instead of
+  bringing them back.
+- `scan` returns keys in byte order and leaves expired keys for `cleanup_expired()`.
+- Six internal helper functions (`pgkv._lock_key` and others, names starting with `_`) are
+  new. They are not part of the API and `PUBLIC` cannot execute them.
+
+### Upgrading to 0.3.0
+
+As an extension:
+
+```sql
+ALTER EXTENSION pgkv UPDATE TO '0.3.0';   -- from 0.2.0, or from 0.1.0 (runs both steps)
+```
+
+The upgrade keeps all data, adds one index (`idx_pgkv_key_pattern`, built while holding a
+lock on `pgkv.store`; quick unless the table is very large) and replaces the functions. The
+three new API functions get the same grantees as `set_opts`, `del` and `scan`, so an install
+that revoked `PUBLIC` stays closed.
+
+If pgkv was applied as plain SQL (for example copied into a migration) rather than installed
+with `CREATE EXTENSION`, run the upgrade scripts as plain SQL in a new migration, in order:
+`pgkv--0.1.0--0.2.0.sql` if the copy predates 0.2.0, then `pgkv--0.2.0--0.3.0.sql`. They are
+idempotent and `pgkv--0.2.0--0.3.0.sql` redefines every function, so the result is exactly
+0.3.0. Two things to check on such a copy:
+
+- If the copy lives in a schema with another name, rename `pgkv.` and
+  `search_path = pgkv,` in the scripts the same way the copy was renamed.
+- Every function becomes `SECURITY DEFINER`. If the copy's functions were not (very early
+  copies), roles that could not use pgkv before, because they have no rights on
+  `pgkv.store`, now can if they have `USAGE` on the schema and `EXECUTE` on the functions.
+  Add the `REVOKE`s from [Security Model](#security-model) to the same migration.
+
 ## API Reference
 
 ### Quick Reference Tables
@@ -601,6 +743,8 @@ This prevents caller `search_path` hijacking.
 | `pgkv.get(key)` | Get value of key | JSONB or NULL |
 | `pgkv.del(keys...)` | Delete one or more keys | Number of deleted keys |
 | `pgkv.exists(keys...)` | Check if keys exist | Number of existing keys |
+| `pgkv.cas(key, expected, value, ...)` | Compare-and-set (pgkv extension): write only if the key holds `expected`; NULL expects absence | 1 if written, 0 otherwise |
+| `pgkv.cad(key, expected)` | Compare-and-delete (pgkv extension) | 1 if deleted, 0 otherwise |
 | `pgkv.type(key)` | Get type of key | 'string', 'list', 'set', 'hash', 'zset', or 'none' |
 
 #### TTL Operations
@@ -695,6 +839,8 @@ This prevents caller `search_path` hijacking.
 |----------|-------------|---------|
 | `pgkv.keys(pattern?)` | Find keys matching Redis glob pattern (`*`, `?`, `[...]`) | SETOF TEXT |
 | `pgkv.dbsize()` | Count total keys | BIGINT |
+| `pgkv.scan(cursor, pattern?, count?)` | Page through keys matching a glob pattern (offset cursor) | TABLE(cursor BIGINT, key TEXT) |
+| `pgkv.scan_prefix(prefix, after?, count?)` | Page through keys with a literal prefix (keyset paging, pgkv extension) | TABLE(key TEXT, type TEXT, value JSONB, expires_at TIMESTAMPTZ) |
 
 #### Maintenance
 
@@ -748,14 +894,18 @@ Complete documentation for `set()`, `get()`, `del()`, `exists()`, `type()`, and 
 
 ### Lazy Expiration
 
-All read operations check for expiration and automatically delete expired keys:
+Read operations on a single key check for expiration and delete the key if it has expired:
 
 ```sql
 IF v_expires_at IS NOT NULL AND v_expires_at < clock_timestamp() THEN
-    DELETE FROM pgkv.store WHERE key = p_key;
+    DELETE FROM pgkv.store
+    WHERE key = p_key AND expires_at IS NOT NULL AND expires_at < clock_timestamp();
     RETURN [appropriate_value];
 END IF;
 ```
+
+The delete repeats the expiry check so that a value another session wrote in the meantime
+is never removed (0.2.0 deleted whatever was there).
 
 This approach:
 
@@ -763,6 +913,11 @@ This approach:
 - Ensures expired keys are never returned
 - Uses `clock_timestamp()` for transaction-accurate timing
 - Complements periodic `cleanup_expired()` calls
+
+It also means that a read can write: `get` of an expired key issues a `DELETE`, which fails
+in a read-only transaction or on a hot standby. `keys()` and `dbsize()` delete every expired
+key in the table before answering. `scan`, `scan_prefix` and the write functions do not
+sweep; schedule `cleanup_expired()` (below).
 
 ### Type Validation
 
@@ -829,7 +984,9 @@ Behavior:
 - **KEYS Command**: The `keys()` function scans all keys and should be used cautiously on large datasets
   - Simple patterns (`*`, `?`) use optimized LIKE queries
   - Character classes (`[...]`) automatically fall back to regex matching
-- **Indexes**: The extension creates indexes on expiration timestamps and type column for efficient operations
+- **Indexes**: The extension creates indexes on expiration timestamps and type column for efficient operations, and a `text_pattern_ops` index on the key for prefix matches (`scan`, `scan_prefix`)
+- **Listing keys**: prefer `scan_prefix()` (an index range per page) over `scan()` with a deep cursor (which skips `cursor` rows each call) and over `keys()`
+- **Write contention**: writers of one key queue on its row lock; writers of different keys do not affect each other
 - **SET operations** (SINTER, SUNION, SDIFF) may be slow on very large sets (O(n*m) complexity)
 - **SORTED SET sorting** is O(n log n) on each operation (PostgreSQL sorts in-memory)
 - All operations are ACID-compliant (unlike Redis)
@@ -848,12 +1005,21 @@ SELECT cron.schedule('pgkv-cleanup', '*/5 * * * *', 'SELECT pgkv.cleanup_expired
 
 ## Testing
 
-Run tests using pgTAP:
+Run the single-session tests with pgTAP (the two upgrade tests, `tests/11-*.sql` and
+`tests/13-*.sql`, are plain psql scripts that print `ok` or `bad`):
 
 ```bash
-# Install pgTAP if not already installed
-# Then run tests
-pg_prove tests/*.sql
+psql -v ON_ERROR_STOP=1 -f tests/01-basic-operations.sql   # and so on, or pg_prove
+```
+
+The stress suite starts a throwaway PostgreSQL container and runs pytest against it. It
+includes `stress/test_atomicity.py`, which drives two sessions through each read-then-write
+race (one holds its transaction open while the other runs) and checks that nothing is lost:
+
+```bash
+./stress/run-stress.sh
+# or, against a database you already have:
+PGKV_DSN=postgresql://user:pass@host:5432/db pytest -q stress
 ```
 
 ## License

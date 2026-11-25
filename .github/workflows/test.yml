@@ -56,17 +56,42 @@ jobs:
 
       - name: Run pgTAP tests
         run: |
-          for test_file in tests/0*.sql; do
-            if [ "$test_file" = "tests/11-upgrade-020.sql" ]; then
-              continue
-            fi
+          set -o pipefail
+          for test_file in tests/[0-9]*.sql; do
+            case "$test_file" in
+              tests/[0-9][0-9]-upgrade-*.sql) continue ;;
+            esac
             echo "Running $test_file..."
-            docker exec -i postgres psql -U postgres -d test -v ON_ERROR_STOP=1 < "$test_file"
+            docker exec -i postgres psql -U postgres -d test -v ON_ERROR_STOP=1 -At < "$test_file" | tee /tmp/pgtap.out
+            if grep -Eq '^not ok|^# Looks like' /tmp/pgtap.out; then
+              echo "::error::$test_file failed"
+              exit 1
+            fi
           done
 
-      - name: Test 0.1.0 to 0.2.0 upgrade path
+      - name: Test upgrade paths
         run: |
-          docker exec -i postgres psql -U postgres -d test -v ON_ERROR_STOP=1 < tests/11-upgrade-020.sql
+          set -o pipefail
+          for test_file in tests/[0-9][0-9]-upgrade-*.sql; do
+            echo "Running $test_file..."
+            docker exec -i postgres psql -U postgres -d test -v ON_ERROR_STOP=1 -At < "$test_file" | tee /tmp/upgrade.out
+            if grep -q '^bad' /tmp/upgrade.out; then
+              echo "::error::$test_file failed"
+              exit 1
+            fi
+          done
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run stress and two-session atomicity tests
+        env:
+          PGKV_DSN: postgresql://postgres:postgres@localhost:5432/test
+        run: |
+          pip install -q -r stress/requirements.txt
+          pytest -q stress
 
       - name: Cleanup
         if: always()

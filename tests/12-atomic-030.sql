@@ -3,7 +3,7 @@
 
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(70);
+SELECT plan(74);
 
 SELECT pgkv.flushall();
 
@@ -88,6 +88,12 @@ SELECT is(pgkv.get('m1'), to_jsonb('b'::text), 'MSETNX: the last value for a rep
 SELECT is(pgkv.msetnx('m0', 'x', 'm2', 'y', 'm3', 'z'), 0, 'MSETNX fails when one key exists');
 SELECT is(pgkv.lmove('zz-missing', 'aa-missing', 'LEFT', 'RIGHT'), NULL::jsonb, 'LMOVE from a missing list returns NULL');
 SELECT throws_ok($$SELECT pgkv.lpush('g', 'x')$$, 'P0001', NULL, 'LPUSH on a string is WRONGTYPE');
+SELECT is(pgkv.mset('ms1', 'a', 'ms2', 'b', 'ms1', 'c'), 'OK', 'MSET accepts a repeated key');
+SELECT is(pgkv.get('ms1'), to_jsonb('c'::text), 'MSET: the last value for a repeated key wins');
+SELECT pgkv.set('ms2', 'ttl', 100);
+SELECT pgkv.mset('ms2', 'd');
+SELECT is(pgkv.ttl('ms2'), -1, 'MSET clears the expiry, as SET does');
+SELECT is(pgkv.del('ms1', 'ms2', 'ms1', 'nope'), 2, 'DEL counts each deleted key once');
 SELECT is(pg_temp.placeholders(), 0, 'failed and empty operations leave no placeholder rows');
 SELECT is(pgkv.exists('m0', 'm3', 'aa-missing'), 0, 'and no keys');
 
