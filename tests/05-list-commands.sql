@@ -65,7 +65,7 @@ SELECT is(
 );
 
 -- Test LRANGE function
-SELECT has_function('pgkv', 'lrange', ARRAY['text', 'integer', 'integer'], 'pgkv.lrange function should exist');
+SELECT has_function('pgkv', 'lrange', ARRAY['text', 'bigint', 'bigint'], 'pgkv.lrange function should exist');
 
 -- Test basic range
 SELECT results_eq(
@@ -88,7 +88,7 @@ SELECT results_eq(
 );
 
 -- Test LINDEX function
-SELECT has_function('pgkv', 'lindex', ARRAY['text', 'integer'], 'pgkv.lindex function should exist');
+SELECT has_function('pgkv', 'lindex', ARRAY['text', 'bigint'], 'pgkv.lindex function should exist');
 
 SELECT is(
     pgkv.lindex('mylist', 0),
@@ -109,7 +109,7 @@ SELECT is(
 );
 
 -- Test LSET function
-SELECT has_function('pgkv', 'lset', ARRAY['text', 'integer', 'text'], 'pgkv.lset function should exist');
+SELECT has_function('pgkv', 'lset', ARRAY['text', 'bigint', 'text'], 'pgkv.lset function should exist');
 
 SELECT is(
     pgkv.lset('mylist', 1, 'WORLD'),
@@ -139,13 +139,13 @@ SELECT is(
 -- Test LSET out of range error
 SELECT throws_ok(
     'SELECT pgkv.lset(''mylist'', 99, ''value'')',
-    'P0001',
-    'index out of range',
+    'KV000',
+    'ERR index out of range',
     'LSET should raise exception for out of range index'
 );
 
 -- Test LPOP function
-SELECT has_function('pgkv', 'lpop', ARRAY['text', 'integer'], 'pgkv.lpop function should exist');
+SELECT has_function('pgkv', 'lpop', ARRAY['text', 'bigint'], 'pgkv.lpop function should exist');
 
 -- Single pop
 SELECT is(
@@ -174,7 +174,7 @@ SELECT results_eq(
 );
 
 -- Test RPOP function
-SELECT has_function('pgkv', 'rpop', ARRAY['text', 'integer'], 'pgkv.rpop function should exist');
+SELECT has_function('pgkv', 'rpop', ARRAY['text', 'bigint'], 'pgkv.rpop function should exist');
 
 SELECT is(
     pgkv.rpop('mylist'),
@@ -189,7 +189,7 @@ SELECT is(
 );
 
 -- Test LTRIM function
-SELECT has_function('pgkv', 'ltrim', ARRAY['text', 'integer', 'integer'], 'pgkv.ltrim function should exist');
+SELECT has_function('pgkv', 'ltrim', ARRAY['text', 'bigint', 'bigint'], 'pgkv.ltrim function should exist');
 
 SELECT is(
     pgkv.rpush('trimlist', 'a', 'b', 'c', 'd', 'e'),
@@ -223,7 +223,7 @@ SELECT is(
 );
 
 -- Test LREM function
-SELECT has_function('pgkv', 'lrem', ARRAY['text', 'integer', 'text'], 'pgkv.lrem function should exist');
+SELECT has_function('pgkv', 'lrem', ARRAY['text', 'bigint', 'text'], 'pgkv.lrem function should exist');
 
 -- Setup list with duplicates
 SELECT is(
@@ -287,7 +287,7 @@ SELECT is(
 
 SELECT throws_ok(
     'SELECT pgkv.lpush(''string_key'', ''value'')',
-    'P0001',
+    'KV001',
     'WRONGTYPE Operation against a key holding the wrong kind of value',
     'LPUSH should raise WRONGTYPE for string key'
 );

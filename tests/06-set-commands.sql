@@ -194,7 +194,7 @@ SELECT is(
 
 SELECT throws_ok(
     'SELECT pgkv.sadd(''string_key'', ''member'')',
-    'P0001',
+    'KV001',
     'WRONGTYPE Operation against a key holding the wrong kind of value',
     'SADD should raise WRONGTYPE for string key'
 );

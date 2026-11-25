@@ -191,7 +191,7 @@ SELECT is(
 
 SELECT throws_ok(
     'SELECT pgkv.hset(''string_key'', ''field'', ''value'')',
-    'P0001',
+    'KV001',
     'WRONGTYPE Operation against a key holding the wrong kind of value',
     'HSET should raise WRONGTYPE for string key'
 );
@@ -199,8 +199,8 @@ SELECT throws_ok(
 -- Test odd number of arguments error
 SELECT throws_ok(
     'SELECT pgkv.hset(''test'', ''field1'')',
-    'P0001',
-    'wrong number of arguments for HSET',
+    'KV000',
+    'ERR wrong number of arguments for ''hset'' command',
     'HSET should raise exception for odd number of arguments'
 );
 
@@ -213,8 +213,8 @@ SELECT is(
 
 SELECT throws_ok(
     'SELECT pgkv.hincrby(''hash2'', ''text_field'', 1)',
-    'P0001',
-    'hash value is not an integer or out of range',
+    'KV000',
+    'ERR hash value is not an integer',
     'HINCRBY should raise exception for non-numeric field'
 );
 

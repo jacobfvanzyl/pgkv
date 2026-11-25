@@ -1,0 +1,17 @@
+[
+  {
+    "command": "SETRANGE",
+    "match": "pgkv=Err\\('SETRANGE past the end of the string needs zero-byte padding",
+    "why": "SETRANGE past the end of a string pads with zero bytes in Redis; pgkv values are text and cannot hold them, so it is an error"
+  },
+  {
+    "command": "*",
+    "match": "pgkv=Err\\('(GETRANGE|SETRANGE) range splits a multi-byte UTF-8 character",
+    "why": "a byte range that cuts a multi-byte character in half returns raw bytes in Redis; pgkv values are text, so it is an error"
+  },
+  {
+    "command": "*",
+    "match": "oracle=Err\\('increment or decrement would overflow'\\) pgkv=Err\\('value is not an integer or out of range'\\)",
+    "why": "INCRBYFLOAT is long double arithmetic in Redis and exact decimal arithmetic in pgkv: 9223372036854775807 + 0.1 stays an integer in Redis and is 9223372036854775807.1 in pgkv"
+  }
+]

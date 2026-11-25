@@ -7,7 +7,7 @@ SELECT plan(51);
 SELECT pgkv.flushall();
 
 -- SET options and string helpers
-SELECT has_function('pgkv', 'set_opts', ARRAY['text','text','boolean','boolean','boolean','integer','bigint','bigint','bigint','boolean'], 'set_opts exists');
+SELECT has_function('pgkv', 'set_opts', ARRAY['text','text','boolean','boolean','boolean','bigint','bigint','bigint','bigint','boolean'], 'set_opts exists');
 SELECT is(pgkv.setnx('nx', 'one'), 1, 'SETNX sets missing key');
 SELECT is(pgkv.setnx('nx', 'two'), 0, 'SETNX does not overwrite existing key');
 SELECT is(pgkv.get('nx'), to_jsonb('one'::text), 'SETNX kept original value');
@@ -37,7 +37,7 @@ SELECT results_eq('SELECT field, value FROM pgkv.hscan(''hs'', 0, ''*'', 10) ORD
 SELECT pgkv.sadd('ss', 'a', 'b');
 SELECT results_eq('SELECT member FROM pgkv.sscan(''ss'', 0, ''*'', 10) ORDER BY member', $$VALUES (to_jsonb('a'::text)), (to_jsonb('b'::text))$$, 'SSCAN returns members');
 SELECT pgkv.zadd('zs', '1', 'a', '2', 'b');
-SELECT results_eq('SELECT member, score FROM pgkv.zscan(''zs'', 0, ''*'', 10) ORDER BY member', $$VALUES ('a'::text, 1::numeric), ('b'::text, 2::numeric)$$, 'ZSCAN returns members and scores');
+SELECT results_eq('SELECT member, score FROM pgkv.zscan(''zs'', 0, ''*'', 10) ORDER BY member', $$VALUES ('a'::text, 1::double precision), ('b'::text, 2::double precision)$$, 'ZSCAN returns members and scores');
 
 -- List extensions
 SELECT is(pgkv.lpushx('missing-list', 'x'), 0, 'LPUSHX missing returns 0');
@@ -53,10 +53,10 @@ SELECT is(pgkv.rpoplpush('lx', 'ly'), to_jsonb('tail'::text), 'RPOPLPUSH moves r
 SELECT pgkv.flushall();
 SELECT pgkv.zadd('z1', '1', 'a', '2', 'b', '3', 'c');
 SELECT pgkv.zadd('z2', '10', 'b', '20', 'c', '30', 'd');
-SELECT results_eq('SELECT member, score FROM pgkv.zmscore(''z1'', ''a'', ''x'')', $$VALUES ('a'::text, 1::numeric), ('x'::text, NULL::numeric)$$, 'ZMSCORE returns scores and NULLs');
-SELECT results_eq('SELECT member, score FROM pgkv.zpopmin(''z1'', 1)', $$VALUES ('a'::text, 1::numeric)$$, 'ZPOPMIN returns min');
-SELECT is(pgkv.zscore('z1', 'a'), NULL::numeric, 'ZPOPMIN removes member');
-SELECT results_eq('SELECT member, score FROM pgkv.zpopmax(''z1'', 1)', $$VALUES ('c'::text, 3::numeric)$$, 'ZPOPMAX returns max');
+SELECT results_eq('SELECT member, score FROM pgkv.zmscore(''z1'', ''a'', ''x'')', $$VALUES ('a'::text, 1::double precision), ('x'::text, NULL::double precision)$$, 'ZMSCORE returns scores and NULLs');
+SELECT results_eq('SELECT member, score FROM pgkv.zpopmin(''z1'', 1)', $$VALUES ('a'::text, 1::double precision)$$, 'ZPOPMIN returns min');
+SELECT is(pgkv.zscore('z1', 'a'), NULL::double precision, 'ZPOPMIN removes member');
+SELECT results_eq('SELECT member, score FROM pgkv.zpopmax(''z1'', 1)', $$VALUES ('c'::text, 3::double precision)$$, 'ZPOPMAX returns max');
 SELECT pgkv.zadd('z1', '1', 'a', '3', 'c');
 SELECT is(pgkv.zremrangebyrank('z1', 0, 0), 1, 'ZREMRANGEBYRANK removes by rank');
 SELECT is(pgkv.zremrangebyscore('z1', 2, 3), 2, 'ZREMRANGEBYSCORE removes by score');

@@ -1,0 +1,58 @@
+{
+  "name": "pgkv",
+  "version": "0.4.0",
+  "description": "Redis commands on PostgreSQL with the ioredis API: a thin client for the pgkv extension",
+  "license": "MIT",
+  "author": "Jaco van Zyl",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jacobfvanzyl/pgkv.git",
+    "directory": "clients/typescript"
+  },
+  "keywords": [
+    "postgres",
+    "postgresql",
+    "redis",
+    "ioredis",
+    "key-value",
+    "pgkv"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "generate": "node scripts/generate-types.ts",
+    "typecheck": "node scripts/generate-types.ts --check && tsc -p tsconfig.json",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "test": "pnpm typecheck && vitest run",
+    "prepublishOnly": "pnpm build",
+    "test:bun": "pnpm build && bun test/bun.smoke.mjs"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.8",
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "ioredis": "^6.1.0",
+    "pg": "^8.23.1",
+    "postgres": "^4.1.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.1"
+  }
+}

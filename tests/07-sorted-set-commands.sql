@@ -54,24 +54,24 @@ SELECT has_function('pgkv', 'zscore', ARRAY['text', 'text'], 'pgkv.zscore functi
 
 SELECT is(
     pgkv.zscore('leaderboard', 'alice'),
-    150::numeric,
+    150::double precision,
     'ZSCORE should return 150 for alice (updated score)'
 );
 
 SELECT is(
     pgkv.zscore('leaderboard', 'bob'),
-    200::numeric,
+    200::double precision,
     'ZSCORE should return 200 for bob'
 );
 
 SELECT is(
     pgkv.zscore('leaderboard', 'nonexistent'),
-    NULL::numeric,
+    NULL::double precision,
     'ZSCORE should return NULL for nonexistent member'
 );
 
 -- Test ZRANGE function (ascending order)
-SELECT has_function('pgkv', 'zrange', ARRAY['text', 'integer', 'integer', 'boolean'], 'pgkv.zrange function should exist');
+SELECT has_function('pgkv', 'zrange', ARRAY['text', 'bigint', 'bigint', 'boolean'], 'pgkv.zrange function should exist');
 
 -- Without scores
 SELECT results_eq(
@@ -110,7 +110,7 @@ SELECT is(
 );
 
 -- Test ZREVRANGE function (descending order)
-SELECT has_function('pgkv', 'zrevrange', ARRAY['text', 'integer', 'integer', 'boolean'], 'pgkv.zrevrange function should exist');
+SELECT has_function('pgkv', 'zrevrange', ARRAY['text', 'bigint', 'bigint', 'boolean'], 'pgkv.zrevrange function should exist');
 
 SELECT is(
     (SELECT member FROM pgkv.zrevrange('leaderboard', 0, 0, false)),
@@ -176,7 +176,7 @@ SELECT is(
 );
 
 -- Test ZRANGEBYSCORE function
-SELECT has_function('pgkv', 'zrangebyscore', ARRAY['text', 'numeric', 'numeric', 'boolean'], 'pgkv.zrangebyscore function should exist');
+SELECT has_function('pgkv', 'zrangebyscore', ARRAY['text', 'double precision', 'double precision', 'boolean'], 'pgkv.zrangebyscore function should exist');
 
 SELECT results_eq(
     'SELECT member FROM pgkv.zrangebyscore(''leaderboard'', 150, 200, false) ORDER BY member',
@@ -200,7 +200,7 @@ SELECT ok(
 );
 
 -- Test ZCOUNT function
-SELECT has_function('pgkv', 'zcount', ARRAY['text', 'numeric', 'numeric'], 'pgkv.zcount function should exist');
+SELECT has_function('pgkv', 'zcount', ARRAY['text', 'double precision', 'double precision'], 'pgkv.zcount function should exist');
 
 SELECT is(
     pgkv.zcount('leaderboard', 150, 200),
@@ -221,24 +221,24 @@ SELECT is(
 );
 
 -- Test ZINCRBY function
-SELECT has_function('pgkv', 'zincrby', ARRAY['text', 'numeric', 'text'], 'pgkv.zincrby function should exist');
+SELECT has_function('pgkv', 'zincrby', ARRAY['text', 'double precision', 'text'], 'pgkv.zincrby function should exist');
 
 SELECT is(
     pgkv.zincrby('leaderboard', 50, 'alice'),
-    200::numeric,
+    200::double precision,
     'ZINCRBY should increment alice score to 200'
 );
 
 SELECT is(
     pgkv.zscore('leaderboard', 'alice'),
-    200::numeric,
+    200::double precision,
     'ZSCORE should confirm alice score is now 200'
 );
 
 -- Test ZINCRBY on new member
 SELECT is(
     pgkv.zincrby('leaderboard', 175, 'eve'),
-    175::numeric,
+    175::double precision,
     'ZINCRBY on new member should set score to increment value'
 );
 
@@ -251,7 +251,7 @@ SELECT is(
 -- Test negative increment
 SELECT is(
     pgkv.zincrby('leaderboard', -25, 'bob'),
-    175::numeric,
+    175::double precision,
     'ZINCRBY with negative value should decrement score'
 );
 
@@ -304,7 +304,7 @@ SELECT is(
 
 SELECT throws_ok(
     'SELECT pgkv.zadd(''string_key'', ''100'', ''member'')',
-    'P0001',
+    'KV001',
     'WRONGTYPE Operation against a key holding the wrong kind of value',
     'ZADD should raise WRONGTYPE for string key'
 );
@@ -312,8 +312,8 @@ SELECT throws_ok(
 -- Test ZADD with odd number of arguments error
 SELECT throws_ok(
     'SELECT pgkv.zadd(''test'', ''100'')',
-    'P0001',
-    'wrong number of arguments for ZADD',
+    'KV000',
+    'ERR syntax error',
     'ZADD should raise exception for odd number of arguments'
 );
 

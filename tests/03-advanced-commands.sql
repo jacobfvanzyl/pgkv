@@ -81,8 +81,8 @@ SELECT is(
 
 SELECT throws_ok(
     'SELECT pgkv.incr(''text_key'')',
-    'P0001',
-    'value is not an integer or out of range',
+    'KV000',
+    'ERR value is not an integer or out of range',
     'INCR should raise exception for non-numeric value'
 );
 
@@ -164,7 +164,7 @@ SELECT ok(
 -- ============================================================================
 
 -- Test CLEANUP_EXPIRED function
-SELECT has_function('pgkv', 'cleanup_expired', ARRAY[]::text[], 'pgkv.cleanup_expired function should exist');
+SELECT has_function('pgkv', 'cleanup_expired', ARRAY['integer'], 'pgkv.cleanup_expired function should exist');
 
 -- Test FLUSHALL function
 SELECT has_function('pgkv', 'flushall', ARRAY[]::text[], 'pgkv.flushall function should exist');

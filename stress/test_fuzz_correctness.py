@@ -5,14 +5,19 @@ from pgkv_client import rows, scalar
 
 
 def redis_getrange(value: str, start: int, end: int) -> str:
+    # As Redis computes it (t_string.c getrangeCommand): an end before the start of the
+    # string is clamped to the first character, not treated as an empty range.
     n = len(value)
+    if start < 0 and end < 0 and start > end:
+        return ''
     if start < 0:
         start = n + start
     if end < 0:
         end = n + end
     start = max(start, 0)
+    end = max(end, 0)
     end = min(end, n - 1)
-    if start > end or start >= n:
+    if n == 0 or start > end:
         return ''
     return value[start:end + 1]
 

@@ -77,7 +77,7 @@ SELECT is(
 );
 
 -- Test GETRANGE function
-SELECT has_function('pgkv', 'getrange', ARRAY['text', 'integer', 'integer'], 'pgkv.getrange function should exist');
+SELECT has_function('pgkv', 'getrange', ARRAY['text', 'bigint', 'bigint'], 'pgkv.getrange function should exist');
 
 SELECT is(
     pgkv.set('rangekey', 'This is a string'),
@@ -140,7 +140,7 @@ SELECT is(
 );
 
 -- Test SETRANGE function
-SELECT has_function('pgkv', 'setrange', ARRAY['text', 'integer', 'text'], 'pgkv.setrange function should exist');
+SELECT has_function('pgkv', 'setrange', ARRAY['text', 'bigint', 'text'], 'pgkv.setrange function should exist');
 
 SELECT is(
     pgkv.set('setkey', 'Hello World'),
@@ -196,14 +196,14 @@ SELECT is(
 
 SELECT throws_ok(
     'SELECT pgkv.append(''hash_key'', ''value'')',
-    'P0001',
+    'KV001',
     'WRONGTYPE Operation against a key holding the wrong kind of value',
     'APPEND should raise WRONGTYPE for hash key'
 );
 
 SELECT throws_ok(
     'SELECT pgkv.strlen(''hash_key'')',
-    'P0001',
+    'KV001',
     'WRONGTYPE Operation against a key holding the wrong kind of value',
     'STRLEN should raise WRONGTYPE for hash key'
 );
@@ -211,8 +211,8 @@ SELECT throws_ok(
 -- Test SETRANGE offset error
 SELECT throws_ok(
     'SELECT pgkv.setrange(''test'', -1, ''value'')',
-    'P0001',
-    'offset is out of range',
+    'KV000',
+    'ERR offset is out of range',
     'SETRANGE should raise exception for negative offset'
 );
 

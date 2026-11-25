@@ -56,7 +56,7 @@ SELECT is(
 );
 
 -- Test EXPIRE function
-SELECT has_function('pgkv', 'expire', ARRAY['text', 'integer'], 'pgkv.expire function should exist');
+SELECT has_function('pgkv', 'expire', ARRAY['text', 'bigint', 'text'], 'pgkv.expire function should exist');
 
 SELECT is(
     pgkv.expire('no_ttl_key', 1800),

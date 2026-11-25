@@ -1,0 +1,57 @@
+[package]
+name = "pgkv"
+version = "0.4.0"
+edition = "2021"
+rust-version = "1.88"
+license = "MIT"
+authors = ["Jaco van Zyl"]
+description = "Run redis-rs commands against PostgreSQL through the pgkv extension"
+repository = "https://github.com/jacobfvanzyl/pgkv"
+readme = "README.md"
+keywords = ["redis", "postgres", "key-value", "pgkv"]
+categories = ["database"]
+
+[features]
+default = ["tokio-postgres"]
+# Executor implementations for tokio_postgres::Client and tokio_postgres::Transaction.
+tokio-postgres = ["dep:tokio-postgres"]
+# Executor implementation for sqlx::PgConnection (pooled connections and transactions).
+sqlx = ["dep:sqlx"]
+
+[dependencies]
+# The async connection trait and the Value/RedisError types this crate implements and produces.
+# redis does not build with "aio" alone; it needs a runtime feature.
+redis = { version = "1", default-features = false, features = ["aio", "tokio-comp"] }
+serde_json = "1"
+tokio-postgres = { version = "0.7", default-features = false, optional = true }
+sqlx = { version = "0.9", default-features = false, features = ["postgres"], optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+tokio-postgres = "0.7"
+regex = "1"
+sqlx = { version = "0.9", default-features = false, features = ["postgres", "runtime-tokio"] }
+
+# The integration tests drive pgkv through tokio-postgres.
+[[test]]
+name = "api"
+required-features = ["tokio-postgres"]
+
+[[test]]
+name = "conformance"
+required-features = ["tokio-postgres"]
+
+[[test]]
+name = "parity"
+required-features = ["tokio-postgres"]
+
+[[test]]
+name = "transaction"
+required-features = ["tokio-postgres"]
+
+[[test]]
+name = "sqlx"
+required-features = ["sqlx"]
+
+[package.metadata.docs.rs]
+all-features = true

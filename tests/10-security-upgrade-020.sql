@@ -47,25 +47,25 @@ DROP ROLE pgkv_test_user;
 -- Error-path coverage for new options.
 SELECT throws_ok(
     'SELECT pgkv.set_opts(''bad'', ''v'', p_nx := true, p_xx := true)',
-    'P0001',
+    'KV000',
     NULL,
     'set_opts rejects NX and XX together'
 );
 SELECT throws_ok(
     'SELECT pgkv.set_opts(''bad'', ''v'', p_ex := 1, p_px := 1)',
-    'P0001',
+    'KV000',
     NULL,
     'set_opts rejects conflicting expiry options'
 );
 SELECT throws_ok(
     'SELECT pgkv.lmove(''a'', ''b'', ''MIDDLE'', ''LEFT'')',
-    'P0001',
+    'KV000',
     NULL,
     'lmove rejects invalid side'
 );
 SELECT throws_ok(
     'SELECT pgkv.zunionstore(''z'', ARRAY[''a''], NULL, ''AVG'')',
-    'P0001',
+    'KV000',
     NULL,
     'zunionstore rejects invalid aggregate'
 );

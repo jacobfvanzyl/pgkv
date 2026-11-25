@@ -41,3 +41,4 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv-stress/
+.venv-conformance/

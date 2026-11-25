@@ -522,3 +522,217 @@ def test_mset_is_one_write(dsn, kv):
     scalar(kv, "SELECT pgkv.mset('a', '0', 'b', '0')")
     interleave(dsn, "SELECT pgkv.mset('a', '1', 'b', '1')", "SELECT pgkv.mset('b', '2', 'a', '2')")
     assert text(kv, 'a') == text(kv, 'b') == '2'
+
+
+# --- 0.4.0: collections are stored one row per element ------------------------------------------
+# The key's row in pgkv.store is the lock for the whole collection; these check that it is
+# taken everywhere it must be, and that no element rows are ever left without a key.
+
+ORPHANS = """
+SELECT (SELECT count(*) FROM pgkv.hash_fields e WHERE NOT EXISTS (SELECT 1 FROM pgkv.store s WHERE s.id = e.id))
+     + (SELECT count(*) FROM pgkv.list_items e WHERE NOT EXISTS (SELECT 1 FROM pgkv.store s WHERE s.id = e.id))
+     + (SELECT count(*) FROM pgkv.set_members e WHERE NOT EXISTS (SELECT 1 FROM pgkv.store s WHERE s.id = e.id))
+     + (SELECT count(*) FROM pgkv.zset_members e WHERE NOT EXISTS (SELECT 1 FROM pgkv.store s WHERE s.id = e.id))
+"""
+
+
+def members(conn, key):
+    return sorted(r[0] for r in rows(conn, "SELECT pgkv.smembers(%s) #>> '{}'", (key,)))
+
+
+def hash_of(conn, key):
+    return {f: v for f, v in rows(conn, "SELECT field, value #>> '{}' FROM pgkv.hgetall(%s)", (key,))}
+
+
+def test_hsetnx_has_one_winner(dsn, kv):
+    a, b = interleave(dsn, "SELECT pgkv.hsetnx('h', 'f', 'a')", "SELECT pgkv.hsetnx('h', 'f', 'b')")
+    assert (one(a), one(b)) == (1, 0)
+    assert hash_of(kv, 'h') == {'f': 'a'}
+    assert scalar(kv, "SELECT pgkv.hlen('h')") == 1
+
+
+@pytest.mark.parametrize('existing', [False, True])
+def test_hincrbyfloat_counts_both(dsn, kv, existing):
+    if existing:
+        scalar(kv, "SELECT pgkv.hset('h', 'n', '1.5')")
+    interleave(dsn, "SELECT pgkv.hincrbyfloat('h', 'n', 0.25)", "SELECT pgkv.hincrbyfloat('h', 'n', 0.5)")
+    assert hash_of(kv, 'h') == {'n': '2.25' if existing else '0.75'}
+
+
+def test_del_of_a_hash_and_a_concurrent_hset_leave_no_orphan_fields(dsn, kv):
+    scalar(kv, "SELECT pgkv.hset('h', 'old1', 'v', 'old2', 'v')")
+    interleave(dsn, "SELECT pgkv.del('h')", "SELECT pgkv.hset('h', 'new', 'v')")
+    assert hash_of(kv, 'h') == {'new': 'v'}
+    assert scalar(kv, "SELECT pgkv.hlen('h')") == 1
+    assert scalar(kv, ORPHANS) == 0
+
+
+def test_set_over_a_collection_and_a_concurrent_push_leave_no_orphan_items(dsn, kv):
+    scalar(kv, "SELECT pgkv.rpush('k', 'a', 'b')")
+    # B runs after A: the key is a string by then, so the push is a WRONGTYPE error.
+    with pytest.raises(psycopg.Error, match='WRONGTYPE'):
+        interleave(dsn, "SELECT pgkv.set('k', 'string')", "SELECT pgkv.rpush('k', 'c')")
+    assert text(kv, 'k') == 'string'
+    assert scalar(kv, ORPHANS) == 0
+
+
+def test_two_writers_recreating_an_expired_hash_keep_both_fields(dsn, kv):
+    scalar(kv, "SELECT pgkv.hset('h', 'stale', 'v')")
+    scalar(kv, "SELECT pgkv.expireat('h', 4102444800)")
+    with psycopg.connect(dsn, autocommit=True) as admin:
+        admin.execute("UPDATE pgkv.store SET expires_at = now() - interval '1 hour' WHERE key = 'h'")
+    interleave(dsn, "SELECT pgkv.hset('h', 'a', '1')", "SELECT pgkv.hset('h', 'b', '2')")
+    assert hash_of(kv, 'h') == {'a': '1', 'b': '2'}
+    assert scalar(kv, "SELECT pgkv.ttl('h')") == -1
+    assert scalar(kv, ORPHANS) == 0
+
+
+def test_spop_gives_each_member_once(dsn, kv):
+    scalar(kv, "SELECT pgkv.sadd('s', 'a', 'b')")
+    a, b = interleave(dsn, "SELECT pgkv.spop('s')", "SELECT pgkv.spop('s')")
+    assert sorted([one(a), one(b)]) == ['a', 'b']
+    assert scalar(kv, "SELECT pgkv.exists('s')") == 0
+
+
+def test_smove_moves_a_member_once(dsn, kv):
+    scalar(kv, "SELECT pgkv.sadd('src', 'm')")
+    a, b = interleave(dsn, "SELECT pgkv.smove('src', 'd1', 'm')", "SELECT pgkv.smove('src', 'd2', 'm')")
+    assert (one(a), one(b)) == (1, 0)
+    assert members(kv, 'd1') == ['m'] and members(kv, 'd2') == []
+    assert scalar(kv, "SELECT pgkv.exists('src')") == 0
+
+
+def test_sunionstore_onto_a_source_keeps_a_concurrent_sadd(dsn, kv):
+    scalar(kv, "SELECT pgkv.sadd('a', 'x')")
+    scalar(kv, "SELECT pgkv.sadd('b', 'y')")
+    interleave(dsn, "SELECT pgkv.sunionstore('a', 'a', 'b')", "SELECT pgkv.sadd('a', 'new')")
+    assert members(kv, 'a') == ['new', 'x', 'y']
+    assert scalar(kv, "SELECT pgkv.scard('a')") == 3
+    assert scalar(kv, ORPHANS) == 0
+
+
+def test_zadd_nx_has_one_winner(dsn, kv):
+    a, b = interleave(
+        dsn,
+        "SELECT pgkv.zadd_opts('z', ARRAY['1', 'm'], p_nx => true)",
+        "SELECT pgkv.zadd_opts('z', ARRAY['2', 'm'], p_nx => true)",
+    )
+    assert (one(a), one(b)) == (1, 0)
+    assert scalar(kv, "SELECT pgkv.zscore('z', 'm')") == 1
+
+
+def test_zpopmin_gives_each_member_once(dsn, kv):
+    scalar(kv, "SELECT pgkv.zadd('z', '1', 'a', '2', 'b')")
+    a, b = interleave(dsn, "SELECT member FROM pgkv.zpopmin('z')", "SELECT member FROM pgkv.zpopmin('z')")
+    assert (one(a), one(b)) == ('a', 'b')
+    assert scalar(kv, "SELECT pgkv.exists('z')") == 0
+
+
+def test_lmpop_gives_each_element_once(dsn, kv):
+    scalar(kv, "SELECT pgkv.rpush('l', 'a', 'b')")
+    a, b = interleave(
+        dsn, "SELECT pgkv.call('LMPOP', '1', 'l', 'LEFT')", "SELECT pgkv.call('LMPOP', '1', 'l', 'LEFT')"
+    )
+    assert (one(a), one(b)) == (['l', ['a']], ['l', ['b']])
+    assert scalar(kv, "SELECT pgkv.exists('l')") == 0
+
+
+def test_list_stays_contiguous_under_concurrent_pushes_and_pops_at_both_ends(dsn, kv):
+    scalar(kv, "SELECT pgkv.rpush('l', '1', '2', '3', '4')")
+    interleave(dsn, "SELECT pgkv.lpush('l', 'head')", "SELECT pgkv.rpush('l', 'tail')")
+    interleave(dsn, "SELECT pgkv.lpop('l')", "SELECT pgkv.rpop('l')")
+    interleave(dsn, "SELECT pgkv.lrem('l', 0, '2')", "SELECT pgkv.linsert('l', 'BEFORE', '4', 'x')")
+    assert lrange(kv, 'l') == ['1', '3', 'x', '4']
+    assert scalar(kv, "SELECT pgkv.llen('l')") == 4
+    assert [scalar(kv, "SELECT pgkv.lindex('l', %s) #>> '{}'", (i,)) for i in range(4)] == ['1', '3', 'x', '4']
+
+
+def test_rename_has_one_winner(dsn, kv):
+    scalar(kv, "SELECT pgkv.set('k', 'v')")
+    with pytest.raises(psycopg.Error, match='no such key'):
+        interleave(dsn, "SELECT pgkv.rename('k', 'a')", "SELECT pgkv.rename('k', 'b')")
+    assert text(kv, 'a') == 'v'
+    assert scalar(kv, "SELECT pgkv.exists('k', 'b')") == 0
+
+
+def test_rename_of_a_collection_keeps_a_concurrent_write_to_it(dsn, kv):
+    scalar(kv, "SELECT pgkv.sadd('s', 'a')")
+    interleave(dsn, "SELECT pgkv.rename('s', 't')", "SELECT pgkv.sadd('s', 'b')")
+    # B ran after A: the set moved to 't', and 's' is a new set holding only B's member.
+    assert members(kv, 't') == ['a'] and members(kv, 's') == ['b']
+    assert scalar(kv, ORPHANS) == 0
+
+
+def test_copy_does_not_tear_a_concurrently_modified_source(dsn, kv):
+    scalar(kv, "SELECT pgkv.rpush('src', 'a', 'b')")
+    interleave(dsn, "SELECT pgkv.rpush('src', 'c')", "SELECT pgkv.copy('src', 'dst')")
+    assert lrange(kv, 'dst') == ['a', 'b', 'c']
+    assert scalar(kv, "SELECT pgkv.llen('dst')") == 3
+
+
+def test_expire_nx_has_one_winner(dsn, kv):
+    scalar(kv, "SELECT pgkv.set('k', 'v')")
+    a, b = interleave(dsn, "SELECT pgkv.expire('k', 100, 'NX')", "SELECT pgkv.expire('k', 5000, 'NX')")
+    assert (one(a), one(b)) == (1, 0)
+    assert scalar(kv, "SELECT pgkv.ttl('k')") <= 100
+
+
+def test_persist_and_expire_do_not_lose_each_other(dsn, kv):
+    scalar(kv, "SELECT pgkv.set('k', 'v', 100)")
+    interleave(dsn, "SELECT pgkv.persist('k')", "SELECT pgkv.expire('k', 500)")
+    assert 400 < scalar(kv, "SELECT pgkv.ttl('k')") <= 500
+
+
+def test_call_and_pipeline_count_every_increment(dsn, kv):
+    a, b = interleave(
+        dsn,
+        """SELECT pgkv.pipeline('[["INCR","n"],["INCR","n"],["INCR","n"]]', true)""",
+        "SELECT pgkv.call('INCRBY', 'n', '10')",
+    )
+    assert one(a) == [1, 2, 3] and one(b) == 13
+
+
+def test_a_failed_command_in_a_pipeline_undoes_only_itself(kv):
+    reply = scalar(
+        kv,
+        """SELECT pgkv.pipeline('[["SET","s","v"],["LPUSH","s","x"],["RPUSH","l","a"],["INCR","l"],["RPUSH","l","b"]]', true)""",
+    )
+    assert reply[0] == {'status': 'OK'} and reply[2] == 1 and reply[4] == 2
+    assert reply[1]['error'].startswith('WRONGTYPE') and reply[3]['error'].startswith('WRONGTYPE')
+    assert text(kv, 's') == 'v' and lrange(kv, 'l') == ['a', 'b']
+    assert scalar(kv, ORPHANS) == 0
+
+
+def test_try_call_leaves_the_transaction_usable(dsn, kv):
+    scalar(kv, "SELECT pgkv.set('s', 'v')")
+    with psycopg.connect(dsn) as conn:
+        assert scalar(conn, "SELECT pgkv.call('SET', 'before', '1')") == {'status': 'OK'}
+        assert scalar(conn, "SELECT pgkv.try_call('LPUSH', 's', 'x')")['error'].startswith('WRONGTYPE')
+        assert scalar(conn, "SELECT pgkv.try_call('SET', 'after', '2')") == {'status': 'OK'}
+        conn.commit()
+    assert text(kv, 'before') == '1' and text(kv, 'after') == '2'
+
+
+def test_many_sessions_on_one_collection_keep_its_count_right(dsn, kv):
+    def worker(n):
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            for i in range(40):
+                conn.execute("SELECT pgkv.hset('h', %s, 'v')", (f'{n}:{i}',))
+                conn.execute("SELECT pgkv.sadd('s', %s)", (f'{n}:{i}',))
+                conn.execute("SELECT pgkv.zadd('z', %s, %s)", (str(i), f'{n}:{i}'))
+                conn.execute("SELECT pgkv.rpush('l', %s)", (f'{n}:{i}',))
+                if i % 4 == 3:
+                    conn.execute("SELECT pgkv.hdel('h', %s)", (f'{n}:{i - 1}',))
+                    conn.execute("SELECT pgkv.srem('s', %s)", (f'{n}:{i - 1}',))
+                    conn.execute("SELECT pgkv.zrem('z', %s)", (f'{n}:{i - 1}',))
+                    conn.execute("SELECT pgkv.lpop('l')")
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(worker, range(8)))
+
+    assert scalar(kv, "SELECT pgkv.hlen('h')") == scalar(kv, "SELECT count(*) FROM pgkv.hgetall('h')") == 240
+    assert scalar(kv, "SELECT pgkv.scard('s')") == scalar(kv, "SELECT count(*) FROM pgkv.smembers('s')") == 240
+    assert scalar(kv, "SELECT pgkv.zcard('z')") == scalar(kv, "SELECT count(*) FROM pgkv.zrange('z', 0, -1)") == 240
+    assert scalar(kv, "SELECT pgkv.llen('l')") == scalar(kv, "SELECT count(*) FROM pgkv.lrange('l', 0, -1)") == 240
+    assert scalar(kv, ORPHANS) == 0
+

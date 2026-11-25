@@ -14,7 +14,7 @@ CREATE FUNCTION pg_temp.placeholders() RETURNS integer LANGUAGE sql AS
 $$ SELECT COUNT(*)::integer FROM pgkv.store WHERE expires_at = '-infinity'; $$;
 
 -- Compare-and-set
-SELECT has_function('pgkv', 'cas', ARRAY['text','text','text','integer','bigint','bigint','bigint','boolean'], 'cas exists');
+SELECT has_function('pgkv', 'cas', ARRAY['text','text','text','bigint','bigint','bigint','bigint','boolean'], 'cas exists');
 SELECT has_function('pgkv', 'cad', ARRAY['text','text'], 'cad exists');
 SELECT is(pgkv.cas('c', 'x', 'v1'), 0, 'CAS on a missing key with an expected value writes nothing');
 SELECT is(pgkv.exists('c'), 0, 'CAS that failed created nothing');
@@ -38,8 +38,8 @@ SELECT is(pgkv.cas('gone', NULL, 'new'), 1, 'CAS expecting absence takes over an
 SELECT is(pgkv.get('gone'), to_jsonb('new'::text), 'CAS replaced the expired key');
 SELECT is(pgkv.ttl('gone'), -1, 'the replacement does not inherit the old expiry');
 SELECT pgkv.hset('h', 'f', 'v');
-SELECT throws_ok($$SELECT pgkv.cas('h', 'x', 'y')$$, 'P0001', NULL, 'CAS on a hash is WRONGTYPE');
-SELECT throws_ok($$SELECT pgkv.cas('c', 'v5', 'v6', p_ex => 1, p_px => 1)$$, 'P0001', NULL, 'CAS rejects conflicting expiry options');
+SELECT throws_ok($$SELECT pgkv.cas('h', 'x', 'y')$$, 'KV001', NULL, 'CAS on a hash is WRONGTYPE');
+SELECT throws_ok($$SELECT pgkv.cas('c', 'v5', 'v6', p_ex => 1, p_px => 1)$$, 'KV000', NULL, 'CAS rejects conflicting expiry options');
 
 -- Compare-and-delete
 SELECT is(pgkv.cad('c', 'nope'), 0, 'CAD with the wrong value deletes nothing');
@@ -47,7 +47,7 @@ SELECT is(pgkv.cad('missing', 'x'), 0, 'CAD on a missing key deletes nothing');
 SELECT is(pgkv.cad('c', NULL), 0, 'CAD with NULL deletes nothing');
 SELECT is(pgkv.cad('c', 'v5'), 1, 'CAD with the right value deletes');
 SELECT is(pgkv.exists('c'), 0, 'CAD deleted the key');
-SELECT throws_ok($$SELECT pgkv.cad('h', 'x')$$, 'P0001', NULL, 'CAD on a hash is WRONGTYPE');
+SELECT throws_ok($$SELECT pgkv.cad('h', 'x')$$, 'KV001', NULL, 'CAD on a hash is WRONGTYPE');
 
 -- SET options and expiry
 SELECT pg_temp.expired('e1');
@@ -79,15 +79,15 @@ SELECT is(pgkv.del('e4', 'k'), 1, 'DEL counts live keys only');
 SELECT pg_temp.expired('e5');
 SELECT is(pgkv.getdel('e5'), NULL::jsonb, 'GETDEL of an expired key returns NULL');
 SELECT is(pgkv.getex('e5', 100), NULL::jsonb, 'GETEX of an expired key returns NULL');
-SELECT throws_ok($$SELECT pgkv.getdel('h')$$, 'P0001', NULL, 'GETDEL on a hash is WRONGTYPE');
-SELECT throws_ok($$SELECT pgkv.getex('h', 100)$$, 'P0001', NULL, 'GETEX on a hash is WRONGTYPE');
+SELECT throws_ok($$SELECT pgkv.getdel('h')$$, 'KV001', NULL, 'GETDEL on a hash is WRONGTYPE');
+SELECT throws_ok($$SELECT pgkv.getex('h', 100)$$, 'KV001', NULL, 'GETEX on a hash is WRONGTYPE');
 
 -- No placeholder row is ever left behind
 SELECT is(pgkv.msetnx('m1', 'a', 'm1', 'b', 'm2', 'c'), 1, 'MSETNX accepts a repeated key');
 SELECT is(pgkv.get('m1'), to_jsonb('b'::text), 'MSETNX: the last value for a repeated key wins');
 SELECT is(pgkv.msetnx('m0', 'x', 'm2', 'y', 'm3', 'z'), 0, 'MSETNX fails when one key exists');
 SELECT is(pgkv.lmove('zz-missing', 'aa-missing', 'LEFT', 'RIGHT'), NULL::jsonb, 'LMOVE from a missing list returns NULL');
-SELECT throws_ok($$SELECT pgkv.lpush('g', 'x')$$, 'P0001', NULL, 'LPUSH on a string is WRONGTYPE');
+SELECT throws_ok($$SELECT pgkv.lpush('g', 'x')$$, 'KV001', NULL, 'LPUSH on a string is WRONGTYPE');
 SELECT is(pgkv.mset('ms1', 'a', 'ms2', 'b', 'ms1', 'c'), 'OK', 'MSET accepts a repeated key');
 SELECT is(pgkv.get('ms1'), to_jsonb('c'::text), 'MSET: the last value for a repeated key wins');
 SELECT pgkv.set('ms2', 'ttl', 100);
@@ -101,7 +101,10 @@ SELECT is(pgkv.exists('m0', 'm3', 'aa-missing'), 0, 'and no keys');
 SELECT pgkv.flushall();
 SELECT pgkv.set(k, 'v') FROM unnest(ARRAY['p:b', 'p:a', 'p:c', 'P:x', 'q:a', 'p_d']) k;
 SELECT pg_temp.expired('p:zz');
-SELECT has_index('pgkv', 'store', 'idx_pgkv_key_pattern', 'prefix index exists');
+SELECT is(
+    (SELECT c.collname::text FROM pg_attribute a JOIN pg_collation c ON c.oid = a.attcollation
+     WHERE a.attrelid = 'pgkv.store'::regclass AND a.attname = 'key'),
+    'C', 'key is byte-ordered, so the primary key serves prefix scans');
 SELECT results_eq(
     $$SELECT key, type, value FROM pgkv.scan_prefix('p:', NULL, 2)$$,
     $$VALUES ('p:a'::text, 'string'::text, to_jsonb('v'::text)), ('p:b', 'string', to_jsonb('v'::text))$$,
@@ -114,7 +117,7 @@ SELECT results_eq(
     $$SELECT key FROM pgkv.scan_prefix('p_')$$,
     $$VALUES ('p_d'::text)$$,
     'SCAN_PREFIX takes the prefix literally');
-SELECT throws_ok($$SELECT * FROM pgkv.scan_prefix('p:', NULL, 0)$$, 'P0001', NULL, 'SCAN_PREFIX rejects a count of 0');
+SELECT throws_ok($$SELECT * FROM pgkv.scan_prefix('p:', NULL, 0)$$, 'KV000', NULL, 'SCAN_PREFIX rejects a count of 0');
 SELECT results_eq(
     $$SELECT cursor, key FROM pgkv.scan(0, 'p:*', 2)$$,
     $$VALUES (2::bigint, 'p:a'::text), (2::bigint, 'p:b'::text)$$,
@@ -129,7 +132,7 @@ SELECT is((SELECT COUNT(*)::integer FROM pgkv.store WHERE key = 'p:zz'), 1, 'SCA
 CREATE ROLE pgkv_test_030;
 SELECT ok(NOT has_function_privilege('pgkv_test_030', 'pgkv._lock_key(text, boolean)', 'EXECUTE'), 'PUBLIC cannot execute _lock_key');
 SELECT ok(NOT has_function_privilege('pgkv_test_030', 'pgkv._put(text, jsonb, text, timestamptz)', 'EXECUTE'), 'PUBLIC cannot execute _put');
-SELECT ok(has_function_privilege('pgkv_test_030', 'pgkv.cas(text, text, text, integer, bigint, bigint, bigint, boolean)', 'EXECUTE'), 'PUBLIC can execute cas');
+SELECT ok(has_function_privilege('pgkv_test_030', 'pgkv.cas(text, text, text, bigint, bigint, bigint, bigint, boolean)', 'EXECUTE'), 'PUBLIC can execute cas');
 DROP ROLE pgkv_test_030;
 
 SELECT * FROM finish();

@@ -7,16 +7,29 @@ on:
     branches: [ main ]
 
 jobs:
+  generated-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # pgkv--<version>.sql and the upgrade script are assembled from sql/ by build.sh.
+      - name: Versioned scripts are up to date with sql/
+        run: |
+          ./build.sh
+          git diff --exit-code -- 'pgkv--*.sql'
+
   test:
     runs-on: ubuntu-latest
 
     strategy:
+      fail-fast: false
       matrix:
-        postgres-version: [12, 13, 14, 15, 16]
+        postgres-version: [12, 13, 14, 15, 16, 17, 18]
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Start PostgreSQL ${{ matrix.postgres-version }}
         run: |
@@ -93,8 +106,105 @@ jobs:
           pip install -q -r stress/requirements.txt
           pytest -q stress
 
+      # Replay Redis commands against a real Redis server and against pgkv.call, and fail on
+      # any difference in a reply or in the data left behind that conformance/expected.json
+      # does not document.
+      - name: Start Redis (the conformance oracle)
+        run: |
+          docker run -d --name redis -p 6379:6379 redis:8
+          until docker exec redis redis-cli ping | grep -q PONG; do sleep 1; done
+
+      - name: Run conformance suite against Redis
+        env:
+          PGKV_DSN: postgresql://postgres:postgres@localhost:5432/test
+          PGKV_ORACLE_URL: redis://localhost:6379/0
+        run: |
+          pip install -q -r conformance/requirements.txt
+          python conformance/run.py --all
+          python conformance/run.py --pipeline
+
       - name: Cleanup
         if: always()
         run: |
-          docker stop postgres
-          docker rm postgres
+          docker rm -f postgres redis
+
+  # The clients replay the conformance scenarios through their own API and through the Redis
+  # client library they mirror, so each needs PostgreSQL with pgkv installed and a Redis server.
+  client-rust:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Start PostgreSQL with pgkv, and Redis
+        run: |
+          docker run -d --name postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:17
+          docker run -d --name redis -p 6379:6379 redis:8
+          until docker exec postgres pg_isready -U postgres; do sleep 1; done
+          docker cp pgkv.control postgres:/tmp/
+          for sql in pgkv--*.sql; do docker cp "$sql" "postgres:/tmp/$sql"; done
+          docker exec postgres bash -c "cp /tmp/pgkv.control /tmp/pgkv--*.sql /usr/share/postgresql/17/extension/"
+          until docker exec postgres psql -U postgres -c "CREATE DATABASE pgkv_test"; do sleep 1; done
+          docker exec postgres psql -U postgres -d pgkv_test -c "CREATE EXTENSION pgkv"
+
+      - name: Format, lint and documentation
+        working-directory: clients/rust
+        run: |
+          rustup component add rustfmt clippy
+          cargo fmt --check
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo clippy --no-default-features -- -D warnings
+          RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
+
+      # Without these variables the integration tests skip rather than fail.
+      - name: Test against PostgreSQL and Redis
+        working-directory: clients/rust
+        env:
+          PGKV_TEST_DSN: postgresql://postgres:postgres@127.0.0.1:5432/pgkv_test
+          PGKV_TEST_REDIS_URL: redis://127.0.0.1:6379/5
+        run: cargo test --all-features
+
+  client-typescript:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Start PostgreSQL with pgkv, and Redis
+        run: |
+          docker run -d --name postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:17
+          docker run -d --name redis -p 6379:6379 redis:8
+          until docker exec postgres pg_isready -U postgres; do sleep 1; done
+          docker cp pgkv.control postgres:/tmp/
+          for sql in pgkv--*.sql; do docker cp "$sql" "postgres:/tmp/$sql"; done
+          docker exec postgres bash -c "cp /tmp/pgkv.control /tmp/pgkv--*.sql /usr/share/postgresql/17/extension/"
+          until docker exec postgres psql -U postgres -c "CREATE DATABASE pgkv_test"; do sleep 1; done
+          docker exec postgres psql -U postgres -d pgkv_test -c "CREATE EXTENSION pgkv"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: clients/typescript/pnpm-lock.yaml
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      # Without these variables the database tests skip rather than fail.
+      - name: Lint, type-check, test and build
+        working-directory: clients/typescript
+        env:
+          PGKV_TEST_DSN: postgres://postgres:postgres@127.0.0.1:5432/pgkv_test
+          PGKV_TEST_REDIS_URL: redis://127.0.0.1:6379/6
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm lint
+          pnpm test
+          pnpm build
+          pnpm test:bun

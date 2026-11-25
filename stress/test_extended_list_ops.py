@@ -14,8 +14,9 @@ def test_extended_list_operations(conn):
 
     assert scalar(conn, "SELECT pgkv.linsert('list', 'BEFORE', 'c', 'b')") == 5
     assert scalar(conn, "SELECT pgkv.linsert('list', 'AFTER', 'tail', 'end')") == 6
-    assert scalar(conn, "SELECT pgkv.linsert('list', 'BEFORE', 'missing', 'x')") == 0
-    assert scalar(conn, "SELECT pgkv.linsert('missing', 'BEFORE', 'x', 'y')") == -1
+    # As in Redis: -1 when the pivot is not in the list, 0 when the key does not exist.
+    assert scalar(conn, "SELECT pgkv.linsert('list', 'BEFORE', 'missing', 'x')") == -1
+    assert scalar(conn, "SELECT pgkv.linsert('missing', 'BEFORE', 'x', 'y')") == 0
     assert list_values(conn, 'list') == ['head', 'a', 'b', 'c', 'tail', 'end']
 
     assert scalar(conn, "SELECT pgkv.lpos('list', 'b')") == 2

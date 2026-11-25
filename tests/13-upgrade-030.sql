@@ -43,9 +43,9 @@ UNION ALL
 SELECT 'constraint', conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'pgkv.store'::regclass;
 
 DROP EXTENSION pgkv CASCADE;
-CREATE EXTENSION pgkv;
+CREATE EXTENSION pgkv VERSION '0.3.0';
 
-SELECT CASE WHEN extversion = '0.3.0' THEN 'ok' ELSE 'bad' END AS default_install_030
+SELECT CASE WHEN extversion = '0.3.0' THEN 'ok' ELSE 'bad' END AS fresh_install_030
 FROM pg_extension WHERE extname = 'pgkv';
 
 CREATE TEMP TABLE pgkv_fresh AS
@@ -73,7 +73,7 @@ DROP TABLE pgkv_upgraded, pgkv_fresh;
 DROP EXTENSION pgkv CASCADE;
 CREATE EXTENSION pgkv VERSION '0.1.0';
 SELECT pgkv.set('chain', 'v');
-ALTER EXTENSION pgkv UPDATE;
+ALTER EXTENSION pgkv UPDATE TO '0.3.0';
 SELECT CASE WHEN extversion = '0.3.0' AND pgkv.cas('chain', 'v', 'w') = 1 THEN 'ok' ELSE 'bad' END AS chain_010_to_030
 FROM pg_extension WHERE extname = 'pgkv';
 
