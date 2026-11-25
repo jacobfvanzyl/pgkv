@@ -27,7 +27,6 @@ SELECT CASE WHEN pgkv.zcard('upgrade:zset') = 2 THEN 'ok' ELSE 'bad' END AS zset
 SELECT CASE WHEN pgkv.setnx('upgrade:new', 'v') = 1 THEN 'ok' ELSE 'bad' END AS new_function_works;
 SELECT CASE WHEN pgkv.json_set('upgrade:json', NULL::text[], '{"ok":true}'::jsonb) = 'OK' THEN 'ok' ELSE 'bad' END AS json_function_works;
 
+-- Leave the default version installed (tests/13-upgrade-030.sql checks which one that is).
 DROP EXTENSION pgkv CASCADE;
 CREATE EXTENSION pgkv;
-SELECT CASE WHEN extversion = '0.2.0' THEN 'ok' ELSE 'bad' END AS default_install_020
-FROM pg_extension WHERE extname = 'pgkv';

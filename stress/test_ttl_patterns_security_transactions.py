@@ -7,8 +7,10 @@ from pgkv_client import rows, scalar
 
 
 def test_ttl_churn_and_cleanup(conn):
-    for i in range(300):
-        assert scalar(conn, "SELECT pgkv.set(%s, %s, 1)", (f'ttl:{i}', f'v{i}')) == 'OK'
+    # One transaction: 300 separate commits can take longer than the 1 s TTL on slow storage.
+    with conn.transaction():
+        for i in range(300):
+            assert scalar(conn, "SELECT pgkv.set(%s, %s, 1)", (f'ttl:{i}', f'v{i}')) == 'OK'
     assert scalar(conn, "SELECT pgkv.dbsize()") == 300
     time.sleep(1.25)
     assert scalar(conn, "SELECT pgkv.get('ttl:1')") is None
