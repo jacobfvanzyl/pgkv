@@ -25,6 +25,8 @@ SELECT current_setting('server_version_num')::integer >= 140000 AS has_numeric_i
 \endif
 SELECT pgkv.zadd('upgrade:zset', '1', 'a', '2.5', 'b', :'top_score', 'top', :'bottom_score', 'bottom');
 SELECT pgkv.expire('upgrade:zset', 1000);
+-- 0.3.0 scores are numeric and can lie outside the range of a double.
+SELECT pgkv.zadd('upgrade:range', '1e400', 'huge', '-1e400', 'neghuge', '1e-400', 'tiny', '3', 'three');
 SELECT pgkv.json_set('upgrade:json', NULL::text[], '{"ok":true}'::jsonb);
 -- 0.3.0 leaves an empty sorted set behind here; 0.4.0 must not carry it over.
 SELECT pgkv.zadd('upgrade:emptied', '1', 'a');
@@ -74,6 +76,9 @@ SELECT CASE WHEN (SELECT array_agg(member) FROM pgkv.zrange('upgrade:zset', 0, -
             THEN 'ok' ELSE 'bad' END AS zset_survived_in_order;
 SELECT CASE WHEN pgkv.zscore('upgrade:zset', 'top') = :'top_score'::double precision AND pgkv.zscore('upgrade:zset', 'b') = 2.5
             THEN 'ok' ELSE 'bad' END AS zset_scores_survived;
+SELECT CASE WHEN pgkv.zscore('upgrade:range', 'huge') = 'infinity' AND pgkv.zscore('upgrade:range', 'neghuge') = '-infinity'
+             AND pgkv.zscore('upgrade:range', 'tiny') = 0 AND pgkv.zscore('upgrade:range', 'three') = 3
+            THEN 'ok' ELSE 'bad' END AS out_of_range_scores_clamped;
 SELECT CASE WHEN pgkv.ttl('upgrade:zset') > 900 THEN 'ok' ELSE 'bad' END AS collection_ttl_survived;
 SELECT CASE WHEN pgkv.json_get('upgrade:json', ARRAY['ok']) = 'true'::jsonb THEN 'ok' ELSE 'bad' END AS json_survived;
 SELECT CASE WHEN pgkv.exists('upgrade:emptied') = 0 AND pgkv.type('upgrade:emptied') = 'none' THEN 'ok' ELSE 'bad' END AS empty_collection_dropped;
@@ -83,7 +88,7 @@ SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM pgkv.store WHERE id IS NOT NULL AND (
 SELECT CASE WHEN (SELECT v FROM pgkv.lpop('upgrade:list') v) = to_jsonb('a'::text) AND pgkv.rpush('upgrade:list', 'z') = 4 THEN 'ok' ELSE 'bad' END AS list_writable;
 SELECT CASE WHEN pgkv.zadd('upgrade:zset', '0', 'new') = 1 AND pgkv.hset('upgrade:hash', 'f2', 'v') = 1 THEN 'ok' ELSE 'bad' END AS mutators_work;
 SELECT CASE WHEN pgkv.call('GET', 'upgrade:string') = to_jsonb('old'::text) THEN 'ok' ELSE 'bad' END AS call_works;
-SELECT CASE WHEN (SELECT COUNT(*) FROM pgkv.scan_prefix('upgrade:', NULL, 100)) = 8 THEN 'ok' ELSE 'bad' END AS scan_prefix_works;
+SELECT CASE WHEN (SELECT COUNT(*) FROM pgkv.scan_prefix('upgrade:', NULL, 100)) = 9 THEN 'ok' ELSE 'bad' END AS scan_prefix_works;
 
 -- An upgraded install must be the same as a fresh one: functions and their privileges,
 -- tables, columns, indexes, constraints, sequences, and what pg_dump is told to dump.

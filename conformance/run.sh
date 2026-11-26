@@ -35,7 +35,7 @@ docker exec "$PG" bash -lc 'cp /tmp/pgkv.control /usr/share/postgresql/*/extensi
 docker exec "$PG" psql -h localhost -U postgres -v ON_ERROR_STOP=1 -q -c 'CREATE EXTENSION pgkv;'
 
 if command -v uv >/dev/null 2>&1; then
-  uv venv -q .venv-conformance
+  uv venv -q --allow-existing .venv-conformance
 else
   "$PYTHON" -m venv .venv-conformance
 fi

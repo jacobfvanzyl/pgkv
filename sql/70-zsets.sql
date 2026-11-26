@@ -403,6 +403,27 @@ $$;
 --   p_by 'LEX':   member bounds ("[a", "(a", "-", "+"), for sets whose scores are all equal
 -- p_rev walks from the highest; p_min is then the upper bound, as in ZRANGE ... REV.
 -- p_offset and p_count are LIMIT (not for RANK); a negative count means no limit.
+-- _ZBOUNDS_CHECK: raise the error a range command gives for malformed bounds, without
+-- reading any key.
+CREATE OR REPLACE FUNCTION pgkv._zbounds_check(p_by TEXT, p_min TEXT, p_max TEXT)
+RETURNS VOID
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+BEGIN
+    IF p_by = 'RANK' THEN
+        PERFORM pgkv._int(p_min);
+        PERFORM pgkv._int(p_max);
+    ELSIF p_by = 'SCORE' THEN
+        PERFORM pgkv._zscore_bound(p_min);
+        PERFORM pgkv._zscore_bound(p_max);
+    ELSE
+        PERFORM pgkv._zlex_bound(p_min);
+        PERFORM pgkv._zlex_bound(p_max);
+    END IF;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION pgkv._zrange(
     p_key TEXT, p_by TEXT, p_min TEXT, p_max TEXT, p_rev BOOLEAN, p_offset BIGINT, p_count BIGINT
 )
@@ -999,6 +1020,7 @@ DECLARE
     v_id BIGINT;
     v_re TEXT := CASE WHEN COALESCE(p_pattern, '*') = '*' THEN NULL ELSE pgkv._glob_re(p_pattern) END;
 BEGIN
+    p_cursor := LEAST(p_cursor, 4611686018427387904);  -- keeps cursor + count inside bigint
     v_peeked := pgkv._peek(p_key, 'zset');
     v_id := v_peeked.o_id;
     RETURN QUERY
@@ -1007,7 +1029,7 @@ BEGIN
         FROM pgkv.zset_members z
         WHERE z.id = v_id AND (v_re IS NULL OR z.member ~ v_re)
         ORDER BY z.member
-        OFFSET p_cursor LIMIT p_count + 1
+        OFFSET p_cursor LIMIT p_count::bigint + 1
     )
     SELECT CASE WHEN (SELECT COUNT(*) FROM page) > p_count THEN p_cursor + p_count ELSE 0 END,
            page.mem::text, page.sc

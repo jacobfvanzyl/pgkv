@@ -437,6 +437,7 @@ DECLARE
     v_id BIGINT;
     v_re TEXT := CASE WHEN COALESCE(p_pattern, '*') = '*' THEN NULL ELSE pgkv._glob_re(p_pattern) END;
 BEGIN
+    p_cursor := LEAST(p_cursor, 4611686018427387904);  -- keeps cursor + count inside bigint
     v_peeked := pgkv._peek(p_key, 'set');
     v_id := v_peeked.o_id;
     RETURN QUERY
@@ -445,7 +446,7 @@ BEGIN
         FROM pgkv.set_members m
         WHERE m.id = v_id AND (v_re IS NULL OR m.member ~ v_re)
         ORDER BY m.member
-        OFFSET p_cursor LIMIT p_count + 1
+        OFFSET p_cursor LIMIT p_count::bigint + 1
     )
     SELECT CASE WHEN (SELECT COUNT(*) FROM page) > p_count THEN p_cursor + p_count ELSE 0 END,
            to_jsonb(page.mem::text)

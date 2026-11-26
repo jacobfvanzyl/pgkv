@@ -1031,7 +1031,8 @@ The upgrade converts every collection to rows and rebuilds the primary key in by
 It holds an exclusive lock on `pgkv.store` while it runs, and the time it takes grows with
 the amount of data: try it on a copy first if the store is large. Expired keys and the
 empty collections 0.3.0 could leave behind are dropped; everything else is kept, including
-expiries. `tests/14-upgrade-040.sql` checks that an upgraded install is identical to a
+expiries. A sorted-set score outside the range of a double, which 0.3.0's `numeric` scores
+allowed, becomes an infinity (or zero if it was too small). `tests/14-upgrade-040.sql` checks that an upgraded install is identical to a
 fresh one, functions, privileges, tables and indexes alike.
 
 If pgkv was applied as plain SQL rather than with `CREATE EXTENSION`, run

@@ -29,3 +29,8 @@ BEGIN
 END;
 $$;
 
+-- Earlier versions also made EXECUTE for PUBLIC a default privilege of the schema, for the
+-- role that installed them. Remove that entry if this is the same role.
+ALTER DEFAULT PRIVILEGES IN SCHEMA pgkv
+    REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+

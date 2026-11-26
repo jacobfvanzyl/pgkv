@@ -280,6 +280,9 @@ LANGUAGE plpgsql
 STABLE
 AS $$
 BEGIN
+    -- Keep cursor + count inside bigint.
+    p_cursor := LEAST(p_cursor, 4611686018427387904);
+    p_count := LEAST(p_count, 4611686018427387904);
     EXECUTE format(
         'SELECT ARRAY(
              SELECT s.key::text FROM pgkv.store s
@@ -401,7 +404,9 @@ DECLARE
     v_id BIGINT;
     v_type TEXT;
 BEGIN
-    PERFORM pgkv._lock_keys(ARRAY[p_key, p_new_key]);
+    -- The destination is reserved even when absent, so a concurrent writer of it waits here
+    -- instead of being overwritten or colliding with the rename.
+    PERFORM pgkv._lock_keys(ARRAY[p_key], ARRAY[p_new_key]);
     IF NOT EXISTS (SELECT 1 FROM pgkv.store s WHERE s.key = p_key AND s.expires_at IS DISTINCT FROM '-infinity') THEN
         PERFORM pgkv._err('ERR no such key');
     END IF;
@@ -422,7 +427,9 @@ SECURITY DEFINER
 SET search_path = pgkv, pg_temp
 AS $$
 BEGIN
-    PERFORM pgkv._lock_keys(ARRAY[p_key, p_new_key]);
+    -- The destination is reserved even when absent, so a concurrent writer of it waits here
+    -- instead of being overwritten or colliding with the rename.
+    PERFORM pgkv._lock_keys(ARRAY[p_key], ARRAY[p_new_key]);
     IF NOT EXISTS (SELECT 1 FROM pgkv.store s WHERE s.key = p_key AND s.expires_at IS DISTINCT FROM '-infinity') THEN
         PERFORM pgkv._err('ERR no such key');
     END IF;

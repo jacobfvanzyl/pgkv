@@ -4,7 +4,7 @@
 
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(129);
+SELECT plan(142);
 
 SELECT pgkv.flushall();
 
@@ -174,6 +174,21 @@ SELECT is(pgkv.pipeline('[["SET","q","1"],["MSET","a","1","b"]]', true) -> 1 ->>
     'ERR wrong number of arguments for ''mset'' command', 'an error Redis finds only when the command runs does not discard the transaction');
 SELECT is(pgkv.get('q') #>> '{}', '1', 'the other commands apply');
 SELECT ok((SELECT COUNT(*) FROM pgkv.commands()) > 130, 'commands() lists what call understands');
+
+-- Review fixes: bounds are validated without reading a key, and scan limits do not overflow
+SELECT is(pgkv.set('', 'a string at the empty key'), 'OK', 'a string can live at the empty key');
+SELECT is(pgkv.call('ZREMRANGEBYSCORE', 'nokey', '0', '1'), '0'::jsonb, 'ZREMRANGEBYSCORE on a missing key is 0 whatever the empty key holds');
+SELECT is(pgkv.call('ZREMRANGEBYRANK', 'nokey', '0', '-1'), '0'::jsonb, 'ZREMRANGEBYRANK too');
+SELECT is(pgkv.call('ZREMRANGEBYLEX', 'nokey', '-', '+'), '0'::jsonb, 'ZREMRANGEBYLEX too');
+SELECT throws_ok($$SELECT pgkv.call('ZREMRANGEBYSCORE', 'nokey', 'x', '1')$$, 'KV000', 'ERR min or max is not a float', 'and bad bounds are still an error on a missing key');
+SELECT is(pgkv.del(''), 1, 'cleanup');
+SELECT is(pgkv.call('SCAN', '0', 'COUNT', '9223372036854775807') ->> 0, '0', 'SCAN with the largest COUNT');
+SELECT is(pgkv.call('SCAN', '9223372036854775807', 'COUNT', '9223372036854775807'), '["0", []]'::jsonb, 'SCAN with the largest cursor and COUNT');
+SELECT is(pgkv.call('HSCAN', 'nokey', '9223372036854775807', 'COUNT', '2147483647'), '["0", []]'::jsonb, 'HSCAN at the limits');
+SELECT is(pgkv.call('SSCAN', 'nokey', '9223372036854775807', 'COUNT', '9223372036854775807'), '["0", []]'::jsonb, 'SSCAN at the limits');
+SELECT is(pgkv.call('ZSCAN', 'nokey', '9223372036854775807', 'COUNT', '4294967296'), '["0", []]'::jsonb, 'ZSCAN at the limits');
+SELECT is((SELECT COUNT(*)::integer FROM pgkv.hscan('nokey', 9223372036854775807, '*', 2147483647)), 0, 'hscan() at the limits');
+SELECT is((SELECT COUNT(*)::integer FROM pgkv.scan(9223372036854775807, '*', 2147483647)), 0, 'scan() at the limits');
 
 -- Privileges: closed by default, opened per role
 CREATE ROLE pgkv_test_040;

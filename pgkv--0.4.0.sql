@@ -1034,6 +1034,9 @@ LANGUAGE plpgsql
 STABLE
 AS $$
 BEGIN
+    -- Keep cursor + count inside bigint.
+    p_cursor := LEAST(p_cursor, 4611686018427387904);
+    p_count := LEAST(p_count, 4611686018427387904);
     EXECUTE format(
         'SELECT ARRAY(
              SELECT s.key::text FROM pgkv.store s
@@ -1155,7 +1158,9 @@ DECLARE
     v_id BIGINT;
     v_type TEXT;
 BEGIN
-    PERFORM pgkv._lock_keys(ARRAY[p_key, p_new_key]);
+    -- The destination is reserved even when absent, so a concurrent writer of it waits here
+    -- instead of being overwritten or colliding with the rename.
+    PERFORM pgkv._lock_keys(ARRAY[p_key], ARRAY[p_new_key]);
     IF NOT EXISTS (SELECT 1 FROM pgkv.store s WHERE s.key = p_key AND s.expires_at IS DISTINCT FROM '-infinity') THEN
         PERFORM pgkv._err('ERR no such key');
     END IF;
@@ -1176,7 +1181,9 @@ SECURITY DEFINER
 SET search_path = pgkv, pg_temp
 AS $$
 BEGIN
-    PERFORM pgkv._lock_keys(ARRAY[p_key, p_new_key]);
+    -- The destination is reserved even when absent, so a concurrent writer of it waits here
+    -- instead of being overwritten or colliding with the rename.
+    PERFORM pgkv._lock_keys(ARRAY[p_key], ARRAY[p_new_key]);
     IF NOT EXISTS (SELECT 1 FROM pgkv.store s WHERE s.key = p_key AND s.expires_at IS DISTINCT FROM '-infinity') THEN
         PERFORM pgkv._err('ERR no such key');
     END IF;
@@ -2456,6 +2463,7 @@ DECLARE
     v_id BIGINT;
     v_re TEXT := CASE WHEN COALESCE(p_pattern, '*') = '*' THEN NULL ELSE pgkv._glob_re(p_pattern) END;
 BEGIN
+    p_cursor := LEAST(p_cursor, 4611686018427387904);  -- keeps cursor + count inside bigint
     v_peeked := pgkv._peek(p_key, 'hash');
     v_id := v_peeked.o_id;
     RETURN QUERY
@@ -2464,7 +2472,7 @@ BEGIN
         FROM pgkv.hash_fields h
         WHERE h.id = v_id AND (v_re IS NULL OR h.field ~ v_re)
         ORDER BY h.field
-        OFFSET p_cursor LIMIT p_count + 1
+        OFFSET p_cursor LIMIT p_count::bigint + 1
     )
     SELECT CASE WHEN (SELECT COUNT(*) FROM page) > p_count THEN p_cursor + p_count ELSE 0 END,
            page.field::text, page.value
@@ -3508,6 +3516,7 @@ DECLARE
     v_id BIGINT;
     v_re TEXT := CASE WHEN COALESCE(p_pattern, '*') = '*' THEN NULL ELSE pgkv._glob_re(p_pattern) END;
 BEGIN
+    p_cursor := LEAST(p_cursor, 4611686018427387904);  -- keeps cursor + count inside bigint
     v_peeked := pgkv._peek(p_key, 'set');
     v_id := v_peeked.o_id;
     RETURN QUERY
@@ -3516,7 +3525,7 @@ BEGIN
         FROM pgkv.set_members m
         WHERE m.id = v_id AND (v_re IS NULL OR m.member ~ v_re)
         ORDER BY m.member
-        OFFSET p_cursor LIMIT p_count + 1
+        OFFSET p_cursor LIMIT p_count::bigint + 1
     )
     SELECT CASE WHEN (SELECT COUNT(*) FROM page) > p_count THEN p_cursor + p_count ELSE 0 END,
            to_jsonb(page.mem::text)
@@ -3929,6 +3938,27 @@ $$;
 --   p_by 'LEX':   member bounds ("[a", "(a", "-", "+"), for sets whose scores are all equal
 -- p_rev walks from the highest; p_min is then the upper bound, as in ZRANGE ... REV.
 -- p_offset and p_count are LIMIT (not for RANK); a negative count means no limit.
+-- _ZBOUNDS_CHECK: raise the error a range command gives for malformed bounds, without
+-- reading any key.
+CREATE OR REPLACE FUNCTION pgkv._zbounds_check(p_by TEXT, p_min TEXT, p_max TEXT)
+RETURNS VOID
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+BEGIN
+    IF p_by = 'RANK' THEN
+        PERFORM pgkv._int(p_min);
+        PERFORM pgkv._int(p_max);
+    ELSIF p_by = 'SCORE' THEN
+        PERFORM pgkv._zscore_bound(p_min);
+        PERFORM pgkv._zscore_bound(p_max);
+    ELSE
+        PERFORM pgkv._zlex_bound(p_min);
+        PERFORM pgkv._zlex_bound(p_max);
+    END IF;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION pgkv._zrange(
     p_key TEXT, p_by TEXT, p_min TEXT, p_max TEXT, p_rev BOOLEAN, p_offset BIGINT, p_count BIGINT
 )
@@ -4525,6 +4555,7 @@ DECLARE
     v_id BIGINT;
     v_re TEXT := CASE WHEN COALESCE(p_pattern, '*') = '*' THEN NULL ELSE pgkv._glob_re(p_pattern) END;
 BEGIN
+    p_cursor := LEAST(p_cursor, 4611686018427387904);  -- keeps cursor + count inside bigint
     v_peeked := pgkv._peek(p_key, 'zset');
     v_id := v_peeked.o_id;
     RETURN QUERY
@@ -4533,7 +4564,7 @@ BEGIN
         FROM pgkv.zset_members z
         WHERE z.id = v_id AND (v_re IS NULL OR z.member ~ v_re)
         ORDER BY z.member
-        OFFSET p_cursor LIMIT p_count + 1
+        OFFSET p_cursor LIMIT p_count::bigint + 1
     )
     SELECT CASE WHEN (SELECT COUNT(*) FROM page) > p_count THEN p_cursor + p_count ELSE 0 END,
            page.mem::text, page.sc
@@ -4803,6 +4834,8 @@ BEGIN
     IF o_cursor < 0 THEN
         PERFORM pgkv._err('ERR invalid cursor');
     END IF;
+    -- Cursors are offsets: one this large is past the end of anything.
+    o_cursor := LEAST(o_cursor, 4611686018427387904);
     o_pattern := '*';
     o_count := 10;
     o_novalues := FALSE;
@@ -4821,6 +4854,8 @@ BEGIN
             IF o_count < 1 THEN
                 PERFORM pgkv._err('ERR syntax error');
             END IF;
+            -- A page cannot usefully be larger than this, and the scan functions add to it.
+            o_count := LEAST(o_count, 1073741824);
             i := i + 2;
         ELSIF v_opt = 'TYPE' THEN
             o_type := argv[i + 1];
@@ -5596,7 +5631,7 @@ BEGIN
     WHEN 'ZREMRANGEBYRANK', 'ZREMRANGEBYSCORE', 'ZREMRANGEBYLEX' THEN
         IF n <> 4 THEN PERFORM pgkv._arity(c); END IF;
         -- Validate the bounds even when the key does not exist.
-        PERFORM 1 FROM pgkv._zrange('', substr(c, 12), argv[3], argv[4], FALSE, 0, 0);
+        PERFORM pgkv._zbounds_check(substr(c, 12), argv[3], argv[4]);
         RETURN to_jsonb((SELECT COUNT(*) FROM pgkv._zremrange(argv[2], substr(c, 12), argv[3], argv[4], FALSE)));
     WHEN 'ZPOPMIN', 'ZPOPMAX' THEN
         IF n < 2 THEN PERFORM pgkv._arity(c); END IF;
@@ -5947,19 +5982,17 @@ $$;
 -- the extension scripts, with pgkv.grant_access.
 
 -- PostgreSQL lets PUBLIC execute a new function unless told otherwise, and versions before
--- 0.4.0 granted the schema and every function to PUBLIC.
+-- 0.4.0 granted the schema and every function to PUBLIC. This covers the functions that
+-- exist now. Nothing can make it the default for later ones (default privileges set for one
+-- schema can only add to the global defaults), so an upgrade script revokes PUBLIC from
+-- each function it adds.
 REVOKE ALL ON SCHEMA pgkv FROM PUBLIC;
 REVOKE ALL ON ALL ROUTINES IN SCHEMA pgkv FROM PUBLIC;
-ALTER DEFAULT PRIVILEGES IN SCHEMA pgkv
-    REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 
--- No direct access to the tables or the sequence
+-- No direct access to the tables or the sequence. PUBLIC has none by default; this is for
+-- an install where it was granted.
 REVOKE ALL ON ALL TABLES IN SCHEMA pgkv FROM PUBLIC;
-ALTER DEFAULT PRIVILEGES IN SCHEMA pgkv
-    REVOKE ALL ON TABLES FROM PUBLIC;
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA pgkv FROM PUBLIC;
-ALTER DEFAULT PRIVILEGES IN SCHEMA pgkv
-    REVOKE ALL ON SEQUENCES FROM PUBLIC;
 
 -- Monitoring access (following pgmq pattern)
 GRANT USAGE ON SCHEMA pgkv TO pg_monitor;

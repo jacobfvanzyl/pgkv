@@ -736,3 +736,31 @@ def test_many_sessions_on_one_collection_keep_its_count_right(dsn, kv):
     assert scalar(kv, "SELECT pgkv.llen('l')") == scalar(kv, "SELECT count(*) FROM pgkv.lrange('l', 0, -1)") == 240
     assert scalar(kv, ORPHANS) == 0
 
+
+
+def test_renamenx_does_not_overwrite_a_concurrent_setnx_of_the_destination(dsn, kv):
+    scalar(kv, "SELECT pgkv.set('src', 'moved')")
+    a, b = interleave(dsn, "SELECT pgkv.setnx('dst', 'first')", "SELECT pgkv.renamenx('src', 'dst')")
+    assert (one(a), one(b)) == (1, 0)
+    assert text(kv, 'dst') == 'first' and text(kv, 'src') == 'moved'
+
+
+def test_setnx_loses_to_a_concurrent_renamenx_onto_the_key(dsn, kv):
+    scalar(kv, "SELECT pgkv.set('src', 'moved')")
+    a, b = interleave(dsn, "SELECT pgkv.renamenx('src', 'dst')", "SELECT pgkv.setnx('dst', 'late')")
+    assert (one(a), one(b)) == (1, 0)
+    assert text(kv, 'dst') == 'moved' and scalar(kv, "SELECT pgkv.exists('src')") == 0
+
+
+def test_rename_onto_a_concurrently_created_key_replaces_it(dsn, kv):
+    scalar(kv, "SELECT pgkv.set('src', 'moved')")
+    a, b = interleave(dsn, "SELECT pgkv.rpush('dst', 'a', 'b')", "SELECT pgkv.rename('src', 'dst')")
+    assert one(b) == 'OK'
+    assert text(kv, 'dst') == 'moved' and scalar(kv, "SELECT pgkv.exists('src')") == 0
+    assert scalar(kv, ORPHANS) == 0
+
+
+def test_a_failed_renamenx_in_a_pipeline_leaves_no_placeholder(kv):
+    reply = scalar(kv, """SELECT pgkv.pipeline('[["RENAMENX","nosuch","other"],["SET","x","1"]]')""")
+    assert reply[0] == {'error': 'ERR no such key'} and reply[1] == {'status': 'OK'}
+    assert scalar(kv, "SELECT count(*) FROM pgkv.store WHERE key = 'other'") == 0

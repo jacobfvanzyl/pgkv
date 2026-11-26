@@ -95,6 +95,8 @@ BEGIN
     IF o_cursor < 0 THEN
         PERFORM pgkv._err('ERR invalid cursor');
     END IF;
+    -- Cursors are offsets: one this large is past the end of anything.
+    o_cursor := LEAST(o_cursor, 4611686018427387904);
     o_pattern := '*';
     o_count := 10;
     o_novalues := FALSE;
@@ -113,6 +115,8 @@ BEGIN
             IF o_count < 1 THEN
                 PERFORM pgkv._err('ERR syntax error');
             END IF;
+            -- A page cannot usefully be larger than this, and the scan functions add to it.
+            o_count := LEAST(o_count, 1073741824);
             i := i + 2;
         ELSIF v_opt = 'TYPE' THEN
             o_type := argv[i + 1];
@@ -888,7 +892,7 @@ BEGIN
     WHEN 'ZREMRANGEBYRANK', 'ZREMRANGEBYSCORE', 'ZREMRANGEBYLEX' THEN
         IF n <> 4 THEN PERFORM pgkv._arity(c); END IF;
         -- Validate the bounds even when the key does not exist.
-        PERFORM 1 FROM pgkv._zrange('', substr(c, 12), argv[3], argv[4], FALSE, 0, 0);
+        PERFORM pgkv._zbounds_check(substr(c, 12), argv[3], argv[4]);
         RETURN to_jsonb((SELECT COUNT(*) FROM pgkv._zremrange(argv[2], substr(c, 12), argv[3], argv[4], FALSE)));
     WHEN 'ZPOPMIN', 'ZPOPMAX' THEN
         IF n < 2 THEN PERFORM pgkv._arity(c); END IF;

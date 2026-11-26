@@ -17,12 +17,18 @@ FROM pgkv.store s CROSS JOIN LATERAL jsonb_array_elements(s.value) e(v)
 WHERE s.type = 'set' AND jsonb_typeof(s.value) = 'array';
 
 -- 0.3.0 stored infinite scores as the JSON strings "Infinity" and "-Infinity"; a NaN
--- score, which it accepted by mistake, has no place in a sorted set and is dropped.
+-- score, which it accepted by mistake, has no place in a sorted set and is dropped. Its
+-- scores were numeric, so one can lie outside the range of a double: such a score becomes
+-- the nearest double there is, an infinity or zero, rather than failing the upgrade.
 INSERT INTO pgkv.zset_members (id, member, score)
-SELECT s.id, kv.key, (kv.value #>> '{}')::double precision
-FROM pgkv.store s CROSS JOIN LATERAL jsonb_each(s.value) kv
+SELECT s.id, kv.key,
+       CASE WHEN t.v IN ('Infinity', '-Infinity') THEN t.v::double precision
+            WHEN abs(t.v::numeric) > 1.7976931348623157e308 THEN sign(t.v::numeric) * 'infinity'::double precision
+            WHEN abs(t.v::numeric) < 4.9406564584124654e-324 THEN 0
+            ELSE t.v::double precision END
+FROM pgkv.store s CROSS JOIN LATERAL jsonb_each(s.value) kv CROSS JOIN LATERAL (SELECT kv.value #>> '{}') t(v)
 WHERE s.type = 'zset' AND jsonb_typeof(s.value) = 'object'
-  AND (kv.value #>> '{}') <> 'NaN';
+  AND t.v <> 'NaN';
 
 UPDATE pgkv.store s
 SET card = c.n, head = CASE WHEN s.type = 'list' THEN 0 END, value = NULL

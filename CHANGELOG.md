@@ -101,6 +101,8 @@ Differences from Redis found by the conformance suite:
   out of `pg_dump`.)
 - The upgrade rewrites `pgkv.store` and converts collections under an exclusive lock; its
   duration grows with the amount of data.
+- A sorted-set score that 0.3.0 stored outside the range of a double (scores were `numeric`)
+  becomes an infinity, or zero if it was too small.
 - `tests/14-upgrade-040.sql` checks that an upgraded install equals a fresh one and that
   every kind of value survives.
 
