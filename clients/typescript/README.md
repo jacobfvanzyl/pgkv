@@ -28,7 +28,8 @@ out of a pool or sends a second statement. It has no runtime dependencies and us
 Node.js APIs, so it runs wherever a PostgreSQL driver does (Node.js 20+, Bun, Deno, edge
 runtimes).
 
-It needs the pgkv extension, version 0.4.0 or later, in the database.
+It needs the pgkv extension, version 0.4.0 or later, in the database. The role the connection uses must own the
+extension or have been given access with `SELECT pgkv.grant_access('<role>')`.
 
 ## Use
 

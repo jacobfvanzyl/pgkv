@@ -37,10 +37,15 @@ This release changes results and some signatures: read "Behaviour changes from 0
   `ZMPOP` through `pgkv.call`.
 - `pgkv.set_unlogged()`: switch all of pgkv's tables to unlogged (or back) together, for
   use as a cache.
+- `pgkv.grant_access(role)` and `pgkv.revoke_access(role)`.
 - PostgreSQL 17 and 18 in the test matrix.
 
 ### Changed
 
+- **Closed by default.** Nothing is granted to `PUBLIC`; a role uses pgkv after
+  `SELECT pgkv.grant_access('<role>')`, which covers the schema and the data commands but
+  not `cleanup_expired` or `set_unlogged`. Earlier versions granted every function to
+  `PUBLIC`.
 - Collections are stored one row per element (`pgkv.hash_fields`, `pgkv.list_items`,
   `pgkv.set_members`, `pgkv.zset_members`) rather than one JSONB value per key. A write to
   one field, member or list end no longer rewrites the collection: eight connections adding
@@ -90,6 +95,10 @@ Differences from Redis found by the conformance suite:
 
 ### Upgrade notes
 
+- The upgrade revokes all access to pgkv, from `PUBLIC` and from roles granted by name, and
+  warns with the names. Run `pgkv.grant_access` for each role in the same transaction as
+  `ALTER EXTENSION ... UPDATE`. (A grant made by the upgrade script itself would be left
+  out of `pg_dump`.)
 - The upgrade rewrites `pgkv.store` and converts collections under an exclusive lock; its
   duration grows with the amount of data.
 - `tests/14-upgrade-040.sql` checks that an upgraded install equals a fresh one and that

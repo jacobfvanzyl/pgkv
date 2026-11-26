@@ -4,7 +4,7 @@
 
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(118);
+SELECT plan(129);
 
 SELECT pgkv.flushall();
 
@@ -175,14 +175,34 @@ SELECT is(pgkv.pipeline('[["SET","q","1"],["MSET","a","1","b"]]', true) -> 1 ->>
 SELECT is(pgkv.get('q') #>> '{}', '1', 'the other commands apply');
 SELECT ok((SELECT COUNT(*) FROM pgkv.commands()) > 130, 'commands() lists what call understands');
 
--- Privileges
+-- Privileges: closed by default, opened per role
 CREATE ROLE pgkv_test_040;
-SELECT ok(has_function_privilege('pgkv_test_040', 'pgkv.call(text[])', 'EXECUTE'), 'PUBLIC can execute call');
-SELECT ok(NOT has_function_privilege('pgkv_test_040', 'pgkv._dispatch(text[])', 'EXECUTE'), 'PUBLIC cannot execute the dispatcher directly');
-SELECT is((SELECT COUNT(*)::integer FROM pg_proc p WHERE p.pronamespace = 'pgkv'::regnamespace AND p.proname LIKE E'\\_%'
-           AND has_function_privilege('pgkv_test_040', p.oid, 'EXECUTE')), 0, 'no internal function is executable by PUBLIC');
+SELECT ok(NOT has_schema_privilege('pgkv_test_040', 'pgkv', 'USAGE'), 'PUBLIC cannot use the schema');
+SELECT is((SELECT COUNT(*)::integer FROM pg_proc p WHERE p.pronamespace = 'pgkv'::regnamespace
+           AND has_function_privilege('pgkv_test_040', p.oid, 'EXECUTE')), 0, 'no function is executable by PUBLIC');
 SELECT is((SELECT COUNT(*)::integer FROM pg_class c WHERE c.relnamespace = 'pgkv'::regnamespace AND c.relkind = 'r'
            AND has_table_privilege('pgkv_test_040', c.oid, 'SELECT,INSERT,UPDATE,DELETE')), 0, 'no table is accessible to PUBLIC');
+SELECT lives_ok($$SELECT pgkv.grant_access('pgkv_test_040')$$, 'GRANT_ACCESS');
+SELECT ok(has_schema_privilege('pgkv_test_040', 'pgkv', 'USAGE'), 'the role can use the schema');
+SELECT is((SELECT COUNT(*)::integer FROM pg_proc p WHERE p.pronamespace = 'pgkv'::regnamespace AND p.proname NOT LIKE E'\\_%'
+           AND p.proname NOT IN ('grant_access', 'revoke_access', 'cleanup_expired', 'set_unlogged')
+           AND NOT has_function_privilege('pgkv_test_040', p.oid, 'EXECUTE')), 0, 'and execute every data command');
+SELECT is((SELECT COUNT(*)::integer FROM pg_proc p WHERE p.pronamespace = 'pgkv'::regnamespace
+           AND (p.proname LIKE E'\\_%' OR p.proname IN ('grant_access', 'revoke_access', 'cleanup_expired', 'set_unlogged'))
+           AND has_function_privilege('pgkv_test_040', p.oid, 'EXECUTE')), 0, 'but no internal or maintenance function');
+SELECT is((SELECT COUNT(*)::integer FROM pg_class c WHERE c.relnamespace = 'pgkv'::regnamespace AND c.relkind = 'r'
+           AND has_table_privilege('pgkv_test_040', c.oid, 'SELECT,INSERT,UPDATE,DELETE')), 0, 'and no table');
+SET ROLE pgkv_test_040;
+SELECT is(pgkv.call('GET', 'c') #>> '{}', 'v', 'the role reads through call');
+SELECT is(pgkv.pipeline('[["SET","acl","1"],["INCR","acl"]]') -> 1, '2'::jsonb, 'and writes through pipeline');
+SELECT throws_ok($$SELECT pgkv.grant_access('pgkv_test_040')$$, '42501', NULL, 'it cannot grant access itself');
+SELECT throws_ok($$SELECT pgkv.cleanup_expired()$$, '42501', NULL, 'or run maintenance');
+RESET ROLE;
+SELECT lives_ok($$SELECT pgkv.revoke_access('pgkv_test_040')$$, 'REVOKE_ACCESS');
+SELECT ok(NOT has_schema_privilege('pgkv_test_040', 'pgkv', 'USAGE')
+          AND NOT has_function_privilege('pgkv_test_040', 'pgkv.call(text[])', 'EXECUTE'), 'takes it all back');
+SELECT ok(has_schema_privilege('pg_monitor', 'pgkv', 'USAGE') AND has_table_privilege('pg_monitor', 'pgkv.store', 'SELECT'),
+          'pg_monitor can read the tables');
 DROP ROLE pgkv_test_040;
 
 -- Durability: the tables switch between logged and unlogged together

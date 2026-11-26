@@ -132,7 +132,7 @@ SELECT is((SELECT COUNT(*)::integer FROM pgkv.store WHERE key = 'p:zz'), 1, 'SCA
 CREATE ROLE pgkv_test_030;
 SELECT ok(NOT has_function_privilege('pgkv_test_030', 'pgkv._lock_key(text, boolean)', 'EXECUTE'), 'PUBLIC cannot execute _lock_key');
 SELECT ok(NOT has_function_privilege('pgkv_test_030', 'pgkv._put(text, jsonb, text, timestamptz)', 'EXECUTE'), 'PUBLIC cannot execute _put');
-SELECT ok(has_function_privilege('pgkv_test_030', 'pgkv.cas(text, text, text, bigint, bigint, bigint, bigint, boolean)', 'EXECUTE'), 'PUBLIC can execute cas');
+SELECT ok(NOT has_function_privilege('pgkv_test_030', 'pgkv.cas(text, text, text, bigint, bigint, bigint, bigint, boolean)', 'EXECUTE'), 'PUBLIC cannot execute cas either (closed by default from 0.4.0)');
 DROP ROLE pgkv_test_030;
 
 SELECT * FROM finish();

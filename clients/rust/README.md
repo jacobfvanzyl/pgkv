@@ -13,7 +13,8 @@ a Redis server would have sent over RESP2, and an error reply becomes the `Redis
 would have produced. All command behaviour lives in the extension's SQL; the crate has no
 per-command code.
 
-Requires the pgkv extension 0.4.0 or later (`CREATE EXTENSION pgkv`).
+Requires the pgkv extension 0.4.0 or later (`CREATE EXTENSION pgkv`). The role the connection
+uses must own the extension or have been given access with `SELECT pgkv.grant_access('<role>')`.
 
 ## Example
 

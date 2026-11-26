@@ -32,7 +32,31 @@ SELECT * FROM pgkv.zpopmin('upgrade:emptied');
 SELECT pgkv.set('upgrade:expired', 'gone', 1);
 UPDATE pgkv.store SET expires_at = now() - interval '1 hour' WHERE key = 'upgrade:expired';
 
+
+-- The upgrade closes pgkv: PUBLIC, open until 0.3.0, and roles granted by name lose access
+-- until the owner grants it again (a grant made by the upgrade script would not be dumped).
+DROP ROLE IF EXISTS pgkv_upgrade_app, pgkv_upgrade_other;
+CREATE ROLE pgkv_upgrade_app;
+CREATE ROLE pgkv_upgrade_other;
+GRANT USAGE ON SCHEMA pgkv TO pgkv_upgrade_app;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgkv TO pgkv_upgrade_app;
+
 ALTER EXTENSION pgkv UPDATE TO '0.4.0';
+
+SELECT CASE WHEN NOT has_schema_privilege(r.rolname, 'pgkv', 'USAGE')
+             AND (SELECT COUNT(*) FROM pg_proc p WHERE p.pronamespace = 'pgkv'::regnamespace
+                  AND has_function_privilege(r.rolname, p.oid, 'EXECUTE')) = 0
+            THEN 'ok' ELSE 'bad' END AS upgrade_closes_access
+FROM pg_roles r WHERE r.rolname IN ('pgkv_upgrade_app', 'pgkv_upgrade_other') ORDER BY r.rolname;
+SELECT pgkv.grant_access('pgkv_upgrade_app');
+SELECT CASE WHEN has_schema_privilege('pgkv_upgrade_app', 'pgkv', 'USAGE')
+             AND has_function_privilege('pgkv_upgrade_app', 'pgkv.call(text[])', 'EXECUTE')
+             AND has_function_privilege('pgkv_upgrade_app', 'pgkv.zscore(text, text)', 'EXECUTE')
+             AND NOT has_function_privilege('pgkv_upgrade_app', 'pgkv.set_unlogged(boolean)', 'EXECUTE')
+            THEN 'ok' ELSE 'bad' END AS grant_access_reopens_it;
+-- Nothing the upgrade did ties the role to the extension, so it can be dropped once revoked.
+SELECT pgkv.revoke_access('pgkv_upgrade_app');
+DROP ROLE pgkv_upgrade_app, pgkv_upgrade_other;
 
 SELECT CASE WHEN extversion = '0.4.0' THEN 'ok' ELSE 'bad' END AS upgraded_040
 FROM pg_extension WHERE extname = 'pgkv';

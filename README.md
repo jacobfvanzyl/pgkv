@@ -21,6 +21,7 @@ A key-value store PostgreSQL Trusted Language Extension (TLE) that provides fami
 
 ```sql
 CREATE EXTENSION pgkv;
+SELECT pgkv.grant_access('my_app_role');   -- nothing is granted by default
 ```
 
 The default extension version is `0.4.0`. To upgrade an existing install (from any earlier version):
@@ -52,42 +53,45 @@ Because objects intentionally live in the `pgkv` schema, the extension is not re
 
 ## Security Model
 
-pgkv uses a secure permission model that provides safe access to the key-value store:
-
-- **Function-Based Access**: All operations go through provided functions - users cannot directly access the underlying storage table
-- **SECURITY DEFINER Functions**: Functions execute with the extension owner's privileges, allowing them to access the internal `pgkv.store` table on behalf of any user
-- **No Direct Table Access**: Regular users do not need (and should not have) direct permissions on the `pgkv.store` table
-- **Controlled API**: All data access is controlled through the well-defined function API, preventing unauthorized table manipulation
-
-This model ensures that:
-- Any user can safely call pgkv functions (e.g., `pgkv.set()`, `pgkv.get()`)
-- The underlying storage remains protected from direct SQL manipulation
-- All operations maintain data integrity through the function layer
-- No additional permission grants are needed for end users
-
-**One shared keyspace.** pgkv has no per-user keys. `EXECUTE` on its functions is granted to
-`PUBLIC`, so every role that can reach the `pgkv` schema can read, overwrite and delete every
-key. Do not expose the `pgkv` schema through an API that maps end users to database roles
-(PostgREST, as in Supabase) unless that is what you want. To restrict it to one role:
+pgkv is closed by default. The role that creates the extension owns it and can use it;
+no other role can until the owner grants access:
 
 ```sql
-REVOKE ALL ON SCHEMA pgkv FROM PUBLIC;
-REVOKE ALL ON ALL FUNCTIONS IN SCHEMA pgkv FROM PUBLIC;
-GRANT USAGE ON SCHEMA pgkv TO my_app_role;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgkv TO my_app_role;
+SELECT pgkv.grant_access('my_app_role');    -- USAGE on the schema, EXECUTE on the data commands
+SELECT pgkv.revoke_access('my_app_role');   -- take it back
 ```
 
-**Example:**
+- **Function-based access**: every operation goes through a function. No role is given
+  rights on the tables, and the functions are `SECURITY DEFINER` with a pinned
+  `search_path`, so they reach the tables on the caller's behalf.
+- **One shared keyspace**: pgkv has no per-user keys. A role with access can read, overwrite
+  and delete every key, so grant it to the roles your backend connects as, not to roles
+  that stand for end users.
+- **Maintenance stays with the owner**: `grant_access` does not cover `cleanup_expired`,
+  `set_unlogged`, `grant_access` or `revoke_access`. Internal helpers (names starting with
+  an underscore) are never granted.
+- **Run `grant_access` again after every upgrade**, so the role also gets the functions the
+  new version adds. It is safe to repeat.
+- `pg_monitor` can read the tables.
 
 ```sql
--- Regular user can call functions without table permissions
-SELECT pgkv.set('mykey', 'myvalue');  -- ✓ Works
-SELECT pgkv.get('mykey');             -- ✓ Works
-
--- But cannot directly access the storage table
-SELECT * FROM pgkv.store;             -- ✗ Permission denied
-INSERT INTO pgkv.store VALUES (...);  -- ✗ Permission denied
+SET ROLE my_app_role;
+SELECT pgkv.set('mykey', 'myvalue');  -- works
+SELECT * FROM pgkv.store;             -- permission denied
+SET ROLE some_other_role;
+SELECT pgkv.get('mykey');             -- permission denied for schema pgkv
 ```
+
+**Supabase.** Grant the server-side role only:
+
+```sql
+SELECT pgkv.grant_access('service_role');
+```
+
+`service_role` is the role the API (PostgREST) switches to for the service key, so this is
+what `supabase.rpc()` needs once `pgkv` is added to the exposed schemas, and it keeps
+`anon` and `authenticated` out. A direct database connection as `postgres` owns the
+extension and needs no grant.
 
 ## JSONB Storage
 
@@ -747,7 +751,7 @@ idempotent and `pgkv--0.2.0--0.3.0.sql` redefines every function, so the result 
 - Every function becomes `SECURITY DEFINER`. If the copy's functions were not (very early
   copies), roles that could not use pgkv before, because they have no rights on
   `pgkv.store`, now can if they have `USAGE` on the schema and `EXECUTE` on the functions.
-  Add the `REVOKE`s from [Security Model](#security-model) to the same migration.
+  Upgrading on to 0.4.0 closes this: see [Security Model](#security-model).
 
 ## Version 0.4.0: Redis Conformance, Scalable Collections, Clients
 
@@ -940,6 +944,14 @@ large ones no longer slow down as they grow.
 0.4.0 changes results where 0.3.0 disagreed with Redis, and changes some signatures. Review
 these before upgrading.
 
+**Access**
+
+- Nothing is granted to `PUBLIC` any more. Earlier versions let every role that could reach
+  the schema use pgkv; from 0.4.0 a role needs `SELECT pgkv.grant_access('<role>')`. The
+  upgrade revokes the access roles had, `PUBLIC` and named roles alike, and prints the
+  named ones: see [Upgrading to 0.4.0](#upgrading-to-040).
+- `cleanup_expired` and `set_unlogged` are for the owner only.
+
 **Errors**
 
 - Errors a Redis server would send as an error reply are raised with SQLSTATE `KV000` or
@@ -1002,8 +1014,18 @@ these before upgrading.
 ### Upgrading to 0.4.0
 
 ```sql
+BEGIN;
 ALTER EXTENSION pgkv UPDATE TO '0.4.0';   -- from any earlier version
+SELECT pgkv.grant_access('my_app_role');  -- once for each role that uses pgkv
+COMMIT;
 ```
+
+**The upgrade revokes all access to pgkv**, from `PUBLIC` and from roles granted by name,
+and warns with the names of the roles that held grants. Grant it again with
+`pgkv.grant_access` in the same transaction, as above, so no session sees pgkv closed. The
+upgrade does not carry grants over itself because PostgreSQL treats privileges set by an
+extension script as part of the extension, and `pg_dump` does not dump those: they would
+be missing after a restore. Grants made with `grant_access` are dumped.
 
 The upgrade converts every collection to rows and rebuilds the primary key in byte order.
 It holds an exclusive lock on `pgkv.store` while it runs, and the time it takes grows with
@@ -1135,6 +1157,10 @@ schema). Unlike the earlier upgrade scripts it is not idempotent.
 | `pgkv.cleanup_expired([limit])` | Remove expired keys, at most `limit` | Number of deleted keys |
 | `pgkv.flushall()` | Delete all keys | 'OK' |
 | `pgkv.set_unlogged([unlogged])` | Make all pgkv tables unlogged, or logged again | 'unlogged' or 'logged' |
+| `pgkv.grant_access(role)` | Let a role use pgkv (schema and data commands) | void |
+| `pgkv.revoke_access(role)` | Remove a role's access to pgkv | void |
+
+`flushall` is a data command; the others are for the extension owner.
 
 #### Added in 0.4.0
 
@@ -1305,18 +1331,23 @@ that trade durability for it.
 
 ### Recommended Cleanup Strategy
 
-For production use, schedule periodic cleanup using pg_cron:
+Expired keys are invisible to every command and are removed when written to, so
+`cleanup_expired` only reclaims the space of keys that expire without being touched again.
+pgkv schedules nothing itself. With pg_cron:
 
 ```sql
--- Install pg_cron extension
-CREATE EXTENSION pg_cron;
+CREATE EXTENSION IF NOT EXISTS pg_cron;
 
--- Schedule cleanup every 5 minutes
-SELECT cron.schedule('pgkv-cleanup', '*/5 * * * *', 'SELECT pgkv.cleanup_expired()');
+-- Every minute, at most 10,000 keys a run
+SELECT cron.schedule('pgkv-cleanup', '* * * * *', 'SELECT pgkv.cleanup_expired(10000)');
 ```
 
-`cleanup_expired(10000)` removes at most that many keys per call, oldest expiry first, and
-skips keys another transaction is working on rather than waiting for them.
+- A limit keeps each run short: it removes the keys that expired longest ago first and
+  skips keys another transaction is working on rather than waiting for them. Raise the
+  limit, or run more often, if more than that many keys expire unread each minute.
+- Schedule the job as the role that owns the extension (`postgres` on Supabase):
+  `cleanup_expired` is not part of `grant_access`.
+- To stop it: `SELECT cron.unschedule('pgkv-cleanup');`
 
 ## Testing
 

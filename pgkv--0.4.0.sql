@@ -5892,47 +5892,77 @@ AS $$
 $$;
 
 -- ============================================================================
--- Security: Set appropriate permissions
+-- Access: who may use pgkv
 -- ============================================================================
+-- pgkv is one shared keyspace behind SECURITY DEFINER functions, so a role that can execute
+-- them can read, overwrite and delete every key. Nothing is granted to PUBLIC: the owner
+-- (the role that created the extension) names the roles that get access.
 
--- Schema access for public
-GRANT USAGE ON SCHEMA pgkv TO PUBLIC;
-
--- Function execution access
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgkv TO PUBLIC;
-
--- Internal helpers (names starting with an underscore) are not part of the API: only the
--- pgkv functions call them, as the owner.
-DO $$
+-- GRANT_ACCESS: Let a role use pgkv: USAGE on the schema and EXECUTE on the data commands.
+-- The maintenance functions (cleanup_expired, set_unlogged and these two) stay with the
+-- owner. Run it again after every upgrade, so the role also gets the functions that are new.
+CREATE OR REPLACE FUNCTION pgkv.grant_access(p_role REGROLE)
+RETURNS VOID
+LANGUAGE plpgsql
+SET search_path = pgkv, pg_temp
+AS $$
 DECLARE
     v_function REGPROCEDURE;
 BEGIN
+    IF p_role IS NULL THEN
+        RAISE EXCEPTION 'pgkv.grant_access: role is required';
+    END IF;
+    EXECUTE format('GRANT USAGE ON SCHEMA pgkv TO %s', p_role);
     FOR v_function IN
         SELECT p.oid::regprocedure FROM pg_catalog.pg_proc p
-        WHERE p.pronamespace = 'pgkv'::regnamespace AND p.proname LIKE E'\\_%'
+        WHERE p.pronamespace = 'pgkv'::regnamespace
+          AND p.proname NOT LIKE E'\\_%'
+          AND p.proname <> ALL (ARRAY['grant_access', 'revoke_access', 'cleanup_expired', 'set_unlogged'])
     LOOP
-        EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC', v_function);
+        EXECUTE format('GRANT EXECUTE ON ROUTINE %s TO %s', v_function, p_role);
     END LOOP;
 END;
 $$;
 
--- Explicitly prevent direct table manipulation
-REVOKE ALL ON ALL TABLES IN SCHEMA pgkv FROM PUBLIC;
+-- REVOKE_ACCESS: Take back everything grant_access gave, and any other privilege the role
+-- holds on pgkv's schema and functions.
+CREATE OR REPLACE FUNCTION pgkv.revoke_access(p_role REGROLE)
+RETURNS VOID
+LANGUAGE plpgsql
+SET search_path = pgkv, pg_temp
+AS $$
+BEGIN
+    IF p_role IS NULL THEN
+        RAISE EXCEPTION 'pgkv.revoke_access: role is required';
+    END IF;
+    EXECUTE format('REVOKE ALL ON ALL ROUTINES IN SCHEMA pgkv FROM %s', p_role);
+    EXECUTE format('REVOKE ALL ON SCHEMA pgkv FROM %s', p_role);
+END;
+$$;
+-- ============================================================================
+-- Security: closed by default
+-- ============================================================================
+-- Shared by the fresh install and the upgrade from 0.3.0 (which first revokes what roles
+-- were granted by name, sql/upgrade-0.3.0-grants.sql). Access is given afterwards, outside
+-- the extension scripts, with pgkv.grant_access.
 
--- Ensure future functions are accessible (critical for upgrades)
+-- PostgreSQL lets PUBLIC execute a new function unless told otherwise, and versions before
+-- 0.4.0 granted the schema and every function to PUBLIC.
+REVOKE ALL ON SCHEMA pgkv FROM PUBLIC;
+REVOKE ALL ON ALL ROUTINES IN SCHEMA pgkv FROM PUBLIC;
 ALTER DEFAULT PRIVILEGES IN SCHEMA pgkv
-    GRANT EXECUTE ON FUNCTIONS TO PUBLIC;
+    REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 
--- Ensure future tables remain protected
+-- No direct access to the tables or the sequence
+REVOKE ALL ON ALL TABLES IN SCHEMA pgkv FROM PUBLIC;
 ALTER DEFAULT PRIVILEGES IN SCHEMA pgkv
     REVOKE ALL ON TABLES FROM PUBLIC;
-
--- Monitoring access (following pgmq pattern)
-GRANT SELECT ON ALL TABLES IN SCHEMA pgkv TO pg_monitor;
-ALTER DEFAULT PRIVILEGES IN SCHEMA pgkv
-    GRANT SELECT ON TABLES TO pg_monitor;
-
--- Protect sequences
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA pgkv FROM PUBLIC;
 ALTER DEFAULT PRIVILEGES IN SCHEMA pgkv
     REVOKE ALL ON SEQUENCES FROM PUBLIC;
+
+-- Monitoring access (following pgmq pattern)
+GRANT USAGE ON SCHEMA pgkv TO pg_monitor;
+GRANT SELECT ON ALL TABLES IN SCHEMA pgkv TO pg_monitor;
+ALTER DEFAULT PRIVILEGES IN SCHEMA pgkv
+    GRANT SELECT ON TABLES TO pg_monitor;
