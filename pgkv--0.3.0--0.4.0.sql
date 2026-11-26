@@ -92,16 +92,31 @@ WHERE s.type = 'set' AND jsonb_typeof(s.value) = 'array';
 -- 0.3.0 stored infinite scores as the JSON strings "Infinity" and "-Infinity"; a NaN
 -- score, which it accepted by mistake, has no place in a sorted set and is dropped. Its
 -- scores were numeric, so one can lie outside the range of a double: such a score becomes
--- the nearest double there is, an infinity or zero, rather than failing the upgrade.
+-- the nearest double there is, an infinity or zero, rather than failing the upgrade. Only
+-- the cast itself knows where that range ends, so scores near it go through a function
+-- that tries the cast (one subtransaction each) and the rest are cast directly.
+CREATE FUNCTION pgkv._upgrade_score(p_text TEXT)
+RETURNS DOUBLE PRECISION
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+BEGIN
+    RETURN p_text::double precision;
+EXCEPTION WHEN numeric_value_out_of_range THEN
+    RETURN CASE WHEN abs(p_text::numeric) < 1 THEN 0 ELSE sign(p_text::numeric) * 'infinity'::double precision END;
+END;
+$$;
+
 INSERT INTO pgkv.zset_members (id, member, score)
 SELECT s.id, kv.key,
        CASE WHEN t.v IN ('Infinity', '-Infinity') THEN t.v::double precision
-            WHEN abs(t.v::numeric) > 1.7976931348623157e308 THEN sign(t.v::numeric) * 'infinity'::double precision
-            WHEN abs(t.v::numeric) < 4.9406564584124654e-324 THEN 0
-            ELSE t.v::double precision END
+            WHEN t.v::numeric = 0 OR abs(t.v::numeric) BETWEEN 1e-300 AND 1e300 THEN t.v::double precision
+            ELSE pgkv._upgrade_score(t.v) END
 FROM pgkv.store s CROSS JOIN LATERAL jsonb_each(s.value) kv CROSS JOIN LATERAL (SELECT kv.value #>> '{}') t(v)
 WHERE s.type = 'zset' AND jsonb_typeof(s.value) = 'object'
   AND t.v <> 'NaN';
+
+DROP FUNCTION pgkv._upgrade_score(TEXT);
 
 UPDATE pgkv.store s
 SET card = c.n, head = CASE WHEN s.type = 'list' THEN 0 END, value = NULL
@@ -1110,7 +1125,7 @@ STABLE
 AS $$
 BEGIN
     -- Keep cursor + count inside bigint.
-    p_cursor := LEAST(p_cursor, 4611686018427387904);
+    p_cursor := LEAST(COALESCE(p_cursor, 0), 4611686018427387904);
     p_count := LEAST(p_count, 4611686018427387904);
     EXECUTE format(
         'SELECT ARRAY(
@@ -2538,7 +2553,7 @@ DECLARE
     v_id BIGINT;
     v_re TEXT := CASE WHEN COALESCE(p_pattern, '*') = '*' THEN NULL ELSE pgkv._glob_re(p_pattern) END;
 BEGIN
-    p_cursor := LEAST(p_cursor, 4611686018427387904);  -- keeps cursor + count inside bigint
+    p_cursor := LEAST(COALESCE(p_cursor, 0), 4611686018427387904);  -- keeps cursor + count inside bigint
     v_peeked := pgkv._peek(p_key, 'hash');
     v_id := v_peeked.o_id;
     RETURN QUERY
@@ -3591,7 +3606,7 @@ DECLARE
     v_id BIGINT;
     v_re TEXT := CASE WHEN COALESCE(p_pattern, '*') = '*' THEN NULL ELSE pgkv._glob_re(p_pattern) END;
 BEGIN
-    p_cursor := LEAST(p_cursor, 4611686018427387904);  -- keeps cursor + count inside bigint
+    p_cursor := LEAST(COALESCE(p_cursor, 0), 4611686018427387904);  -- keeps cursor + count inside bigint
     v_peeked := pgkv._peek(p_key, 'set');
     v_id := v_peeked.o_id;
     RETURN QUERY
@@ -4630,7 +4645,7 @@ DECLARE
     v_id BIGINT;
     v_re TEXT := CASE WHEN COALESCE(p_pattern, '*') = '*' THEN NULL ELSE pgkv._glob_re(p_pattern) END;
 BEGIN
-    p_cursor := LEAST(p_cursor, 4611686018427387904);  -- keeps cursor + count inside bigint
+    p_cursor := LEAST(COALESCE(p_cursor, 0), 4611686018427387904);  -- keeps cursor + count inside bigint
     v_peeked := pgkv._peek(p_key, 'zset');
     v_id := v_peeked.o_id;
     RETURN QUERY

@@ -396,7 +396,7 @@ DECLARE
     v_id BIGINT;
     v_re TEXT := CASE WHEN COALESCE(p_pattern, '*') = '*' THEN NULL ELSE pgkv._glob_re(p_pattern) END;
 BEGIN
-    p_cursor := LEAST(p_cursor, 4611686018427387904);  -- keeps cursor + count inside bigint
+    p_cursor := LEAST(COALESCE(p_cursor, 0), 4611686018427387904);  -- keeps cursor + count inside bigint
     v_peeked := pgkv._peek(p_key, 'hash');
     v_id := v_peeked.o_id;
     RETURN QUERY

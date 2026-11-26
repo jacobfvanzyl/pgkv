@@ -281,7 +281,7 @@ STABLE
 AS $$
 BEGIN
     -- Keep cursor + count inside bigint.
-    p_cursor := LEAST(p_cursor, 4611686018427387904);
+    p_cursor := LEAST(COALESCE(p_cursor, 0), 4611686018427387904);
     p_count := LEAST(p_count, 4611686018427387904);
     EXECUTE format(
         'SELECT ARRAY(

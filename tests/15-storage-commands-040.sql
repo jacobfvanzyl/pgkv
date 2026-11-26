@@ -4,7 +4,7 @@
 
 BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap;
-SELECT plan(142);
+SELECT plan(148);
 
 SELECT pgkv.flushall();
 
@@ -189,6 +189,12 @@ SELECT is(pgkv.call('SSCAN', 'nokey', '9223372036854775807', 'COUNT', '922337203
 SELECT is(pgkv.call('ZSCAN', 'nokey', '9223372036854775807', 'COUNT', '4294967296'), '["0", []]'::jsonb, 'ZSCAN at the limits');
 SELECT is((SELECT COUNT(*)::integer FROM pgkv.hscan('nokey', 9223372036854775807, '*', 2147483647)), 0, 'hscan() at the limits');
 SELECT is((SELECT COUNT(*)::integer FROM pgkv.scan(9223372036854775807, '*', 2147483647)), 0, 'scan() at the limits');
+SELECT is(pgkv.hset('nullcur:h', 'f', 'v') + pgkv.sadd('nullcur:s', 'm') + pgkv.zadd('nullcur:z', '1', 'm'), 3, 'setup for NULL cursors');
+SELECT ok((SELECT COUNT(*) FROM pgkv.scan(NULL, 'nullcur:*')) = 3, 'scan() with a NULL cursor starts at the beginning');
+SELECT is((SELECT COUNT(*)::integer FROM pgkv.hscan('nullcur:h', NULL)), 1, 'hscan() with a NULL cursor');
+SELECT is((SELECT COUNT(*)::integer FROM pgkv.sscan('nullcur:s', NULL)), 1, 'sscan() with a NULL cursor');
+SELECT is((SELECT COUNT(*)::integer FROM pgkv.zscan('nullcur:z', NULL)), 1, 'zscan() with a NULL cursor');
+SELECT is(pgkv.del('nullcur:h', 'nullcur:s', 'nullcur:z'), 3, 'cleanup');
 
 -- Privileges: closed by default, opened per role
 CREATE ROLE pgkv_test_040;

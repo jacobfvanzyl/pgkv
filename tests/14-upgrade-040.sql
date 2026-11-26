@@ -26,7 +26,8 @@ SELECT current_setting('server_version_num')::integer >= 140000 AS has_numeric_i
 SELECT pgkv.zadd('upgrade:zset', '1', 'a', '2.5', 'b', :'top_score', 'top', :'bottom_score', 'bottom');
 SELECT pgkv.expire('upgrade:zset', 1000);
 -- 0.3.0 scores are numeric and can lie outside the range of a double.
-SELECT pgkv.zadd('upgrade:range', '1e400', 'huge', '-1e400', 'neghuge', '1e-400', 'tiny', '3', 'three');
+SELECT pgkv.zadd('upgrade:range', '1e400', 'huge', '-1e400', 'neghuge', '1e-400', 'tiny', '3', 'three',
+    '1.797693134862315705e308', 'edge', '3e-324', 'subnormal');
 SELECT pgkv.json_set('upgrade:json', NULL::text[], '{"ok":true}'::jsonb);
 -- 0.3.0 leaves an empty sorted set behind here; 0.4.0 must not carry it over.
 SELECT pgkv.zadd('upgrade:emptied', '1', 'a');
@@ -78,6 +79,7 @@ SELECT CASE WHEN pgkv.zscore('upgrade:zset', 'top') = :'top_score'::double preci
             THEN 'ok' ELSE 'bad' END AS zset_scores_survived;
 SELECT CASE WHEN pgkv.zscore('upgrade:range', 'huge') = 'infinity' AND pgkv.zscore('upgrade:range', 'neghuge') = '-infinity'
              AND pgkv.zscore('upgrade:range', 'tiny') = 0 AND pgkv.zscore('upgrade:range', 'three') = 3
+             AND pgkv.zscore('upgrade:range', 'edge') = '1.7976931348623157e308' AND pgkv.zscore('upgrade:range', 'subnormal') = '5e-324'
             THEN 'ok' ELSE 'bad' END AS out_of_range_scores_clamped;
 SELECT CASE WHEN pgkv.ttl('upgrade:zset') > 900 THEN 'ok' ELSE 'bad' END AS collection_ttl_survived;
 SELECT CASE WHEN pgkv.json_get('upgrade:json', ARRAY['ok']) = 'true'::jsonb THEN 'ok' ELSE 'bad' END AS json_survived;
